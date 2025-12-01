@@ -14,12 +14,11 @@ Stalwart Mail Server.
 
 ### Building and Running
 
-- `deno task start` - Run the MCP server in development
+- `deno task start` - Run the MCP server
 - `deno task watch` - Run with file watching for development
-
-### Testing Connection
-
-- `deno run --allow-env --allow-net src/mod.ts` - Test JMAP server connection
+- `deno lint src/` - Lint source files
+- `deno check src/mod.ts` - Type check
+- `deno fmt src/` - Format source files
 
 ### Required Environment Variables
 
@@ -33,70 +32,75 @@ JMAP_ACCOUNT_ID="account-id"  # Optional, auto-detected if not provided
 
 ### Core Structure
 
-- **Entry point**: `src/mod.ts` - MCP server setup, JMAP client initialization,
-  and tool registration
-- **Tool modules**: `src/tools/` - Modular tool implementations
-  - `email.ts` - Email search, retrieval, mailbox management, and basic
-    operations
-  - `submission.ts` - Email composition and sending (when JMAP submission
-    capability is available)
-- **Utilities**: `src/utils.ts` - Common utilities like error formatting
+- **Entry point**: `src/mod.ts` - MCP server setup, JMAP client initialization
+- **Tools**: `src/tools/index.ts` - All tool implementations
+- **Utilities**: `src/utils.ts` - Shared helpers (mailbox resolution, body extraction, error handling)
 
-### Key Design Patterns
+### Design Philosophy
 
-- **Functional programming style** - Functions are pure where possible, side
-  effects are contained
-- **Runtime validation** - All inputs validated with Zod schemas before
-  processing
-- **Capability-based registration** - Tools are registered based on JMAP server
-  capabilities
-- **Graceful degradation** - Server adapts to read-only accounts and limited
-  JMAP capabilities
+This MCP is designed to help AI agents work with email, not just expose raw JMAP.
+Key principles:
 
-### JMAP Integration
+1. **One call, useful data** - `search` returns summaries, not just IDs
+2. **Bodies always included** - `show` returns actual content, not blob references
+3. **Flexible inputs** - Mailbox names, roles, or IDs all work
+4. **Helpful errors** - Error messages include recovery suggestions
+5. **Token efficient** - Bodies >25KB truncated inline, cached in full to disk
 
-- Uses `jmap-jam` client library for JMAP RFC 8620/8621 compliance
-- Automatically detects account capabilities and registers appropriate tools
-- Supports both read-only and full-access JMAP accounts
-- Handles JMAP mail (`urn:ietf:params:jmap:mail`) and submission
-  (`urn:ietf:params:jmap:submission`) capabilities
+### Tools
 
-### Tool Categories
+| Tool | Purpose |
+|------|---------|
+| `search` | Find emails with flexible filters. Returns summaries (id, subject, from, date, preview, flags) |
+| `show` | Get full email with body. Bodies >25KB truncated, full version cached to `~/.cache/jmap-mcp/` |
+| `mailboxes` | List folders with roles and message counts |
+| `identities` | List available sending identities |
+| `update` | Bulk operations: flags, move, archive, trash, delete |
+| `send` | Compose and send. Supports reply (`in_reply_to`) and forward (`forward_of`) |
 
-1. **Email Search & Retrieval**: `search_emails`, `get_emails`, `get_threads`
-2. **Mailbox Management**: `get_mailboxes`
-3. **Email Actions** (non-read-only): `mark_emails`, `move_emails`,
-   `delete_emails`
-4. **Email Composition** (submission capability): `send_email`, `reply_to_email`
+### Key Utilities
+
+- **`resolveMailbox()`** - Converts "Inbox", "archive", or IDs to mailbox ID
+- **`parseFlexibleDate()`** - Accepts "yesterday", "2024-01-15", or ISO 8601
+- **`extractBodyText()`** - Gets text from email, HTML fallback with conversion
+- **`formatFlags()`** - Converts JMAP keywords to friendly names (read, flagged, replied)
 
 ## Development Guidelines
 
 ### Adding New Tools
 
-1. Create Zod validation schemas for input parameters
-2. Implement tool logic with proper error handling using `formatError()`
-3. Register tools in appropriate module (`email.ts` vs `submission.ts`)
-4. Tools should be registered conditionally based on JMAP capabilities
+1. Define Zod schema in `src/tools/index.ts`
+2. Implement handler using utility functions
+3. Register in `registerTools()` with appropriate capability checks
+4. Use `mcpResponse(successResponse(data))` or `mcpResponse(errorResponse(error))`
 
 ### Code Style
 
-- Follow functional programming patterns throughout the codebase
-- Use TypeScript types imported from `jmap-jam` for JMAP objects
-- All external inputs must be validated with Zod schemas
-- Error handling should use the `formatError()` utility
-- Console output uses `console.warn()` for server status messages
+- Functional programming patterns
+- `@ts-nocheck` at top of files that call JMAP with options param (type workaround)
+- Error handling via `errorResponse()` with helpful suggestions
+- All mailbox parameters should accept name, role, or ID via `resolveMailbox()`
+
+### Response Format
+
+All tools return consistent format:
+```typescript
+{
+  success: true,
+  data: { ... }
+}
+// or
+{
+  success: false,
+  error: "message",
+  suggestion: "how to fix",
+  retryable: boolean
+}
+```
 
 ### JMAP Considerations
 
-- Email IDs and thread IDs are server-specific strings, not UUIDs
-- Mailbox hierarchies use parent-child relationships via `parentId`
-- Keywords like `$seen`, `$flagged`, `$draft` control email state
-- Date filters must use ISO 8601 format
-- Pagination is handled via `position` and `limit` parameters
-
-## Security Notes
-
-- Bearer tokens are provided via environment variables, never hardcoded
-- No secrets are logged or exposed in MCP responses
-- Input validation prevents injection attacks
-- JMAP protocol provides built-in security through proper authentication
+- Email/thread IDs are server-specific strings
+- Mailbox roles: inbox, archive, drafts, sent, trash, junk
+- Keywords: $seen (read), $flagged, $answered (replied), $draft
+- Body fetching requires `fetchTextBodyValues: true` option

@@ -4,8 +4,7 @@ import { z } from "zod";
 import JamClient from "jmap-jam";
 
 import deno from "../deno.json" with { type: "json" };
-import { registerEmailTools } from "./tools/email.ts";
-import { registerEmailSubmissionTools } from "./tools/submission.ts";
+import { registerTools } from "./tools/index.ts";
 import { formatError } from "./utils.ts";
 
 const JMAPConfigSchema = z.object({
@@ -48,37 +47,35 @@ const createServer = async () => {
     capabilities: {
       tools: {},
     },
-    instructions:
-      `This is a JMAP (JSON Meta Application Protocol) MCP server that provides comprehensive email management capabilities through JMAP-compliant email servers.
+    instructions: `JMAP Email MCP - Manage email through JMAP-compliant servers.
 
-**Available Tools:**
+**Tools:**
 
-**Email Search & Retrieval:**
-- \`search_emails\`: Search emails with filters (text queries, sender/recipient, date ranges, keywords, mailbox filtering). Supports pagination.
-- \`get_emails\`: Retrieve specific emails by ID with full details including headers, body, and attachments.
-- \`get_threads\`: Get email conversation threads by ID.
+- \`search\` - Find emails with flexible filters. Returns summaries (id, subject, from, date, preview, flags).
+  - Accepts mailbox names ("Inbox"), roles ("archive"), or IDs
+  - Flexible dates: "yesterday", "2024-01-15", or full ISO 8601
+  - Flag filters: ["read"], ["!read", "flagged"]
 
-**Mailbox Management:**
-- \`get_mailboxes\`: List mailboxes/folders with hierarchy support and pagination.
+- \`show\` - Get full email with body. Bodies >25KB truncated inline, full version cached to ~/.cache/jmap-mcp/
 
-**Email Actions (when not read-only):**
-- \`mark_emails\`: Mark emails as read/unread or flagged/unflagged.
-- \`move_emails\`: Move emails between mailboxes.
-- \`delete_emails\`: Delete emails permanently (irreversible).
+- \`mailboxes\` - List folders with roles (inbox, archive, sent, trash) and message counts
 
-**Email Composition (when not read-only or submission capabilities are not supported):**
-- \`send_email\`: Compose and send new emails with support for plain text, HTML, CC/BCC recipients.
-- \`reply_to_email\`: Reply to existing emails with reply-all support and proper threading.
+- \`identities\` - List available sending identities (from addresses)
 
-**Usage Guidelines:**
-- All tools use pagination - use \`position\` parameter for large result sets
-- Email search supports complex filters including keywords like '$seen', '$flagged', '$draft'
-- Thread operations maintain conversation context and proper email references
-- Send/reply operations require either textBody or htmlBody (or both)
-- Date filters use ISO 8601 format (e.g., '2024-01-15T10:00:00Z')
+- \`update\` - Bulk operations: add/remove flags, move to mailbox, archive, trash, or delete
+  - Shortcuts: archive=true, trash=true
+  - Accepts mailbox names/roles
 
-**JMAP Compatibility:**
-Works with any JMAP-compliant email server including Cyrus IMAP, Stalwart Mail Server, FastMail, and Apache James. The server automatically detects capabilities and adapts functionality accordingly.`,
+- \`send\` - Compose and send. Supports:
+  - in_reply_to: Email ID to reply to (auto-handles threading)
+  - forward_of: Email ID to forward (includes original)
+  - draft: true to save without sending
+
+**Flags:** read, flagged, replied, draft (no $ prefix needed)
+
+**Mailbox resolution:** Use names ("Inbox"), roles ("archive"), or IDs interchangeably.
+
+Works with FastMail, Cyrus IMAP, Stalwart Mail Server, Apache James, and other JMAP servers.`,
   });
 
   const config = getJMAPConfig();
@@ -87,24 +84,24 @@ Works with any JMAP-compliant email server including Cyrus IMAP, Stalwart Mail S
   const session = await jam.session;
   const account = session.accounts[accountId];
 
-  if ("urn:ietf:params:jmap:mail" in session.capabilities) {
-    registerEmailTools(server, jam, accountId, account.isReadOnly);
-    console.warn("Registered urn:ietf:params:jmap:mail tools");
-
-    if (
-      "urn:ietf:params:jmap:submission" in session.capabilities &&
-      !account.isReadOnly
-    ) {
-      registerEmailSubmissionTools(server, jam, accountId);
-      console.warn("Registered urn:ietf:params:jmap:submission tools");
-    } else {
-      console.warn(
-        "JMAP mail submission capabilities not supported or is read only, email submission tools will not be available",
-      );
-    }
-  } else {
+  if (!("urn:ietf:params:jmap:mail" in session.capabilities)) {
     throw new Error(
       "JMAP mail capabilities not supported but required for this server",
+    );
+  }
+
+  const hasSubmission =
+    "urn:ietf:params:jmap:submission" in session.capabilities &&
+    !account.isReadOnly;
+
+  registerTools(server, jam, accountId, account.isReadOnly, hasSubmission);
+
+  console.warn("Registered JMAP email tools");
+  if (hasSubmission) {
+    console.warn("Email submission enabled");
+  } else {
+    console.warn(
+      "Email submission disabled (read-only account or no submission capability)",
     );
   }
 
