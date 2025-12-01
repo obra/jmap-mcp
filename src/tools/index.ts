@@ -19,6 +19,7 @@ import {
   parseAddresses,
   parseFlags,
   parseFlexibleDate,
+  resolveIdentity,
   resolveMailbox,
   successResponse,
 } from "../utils.ts";
@@ -762,8 +763,17 @@ export function registerTools(
               }
             }
 
+            // Resolve drafts mailbox for email creation
+            const draftsMailbox = await resolveMailbox(jam, accountId, "drafts");
+            if (!draftsMailbox) {
+              return mcpResponse(
+                errorResponse(new Error("Could not find Drafts mailbox")),
+              );
+            }
+
             // Build email
             const emailData: EmailCreate = {
+              mailboxIds: { [draftsMailbox.id]: true },
               subject,
               to,
               cc,
@@ -781,9 +791,22 @@ export function registerTools(
               references,
             };
 
-            // Set identity/from if provided
+            // Resolve identity if provided
+            let resolvedIdentity: { id: string; email: string; name: string | null } | null = null;
             if (args.identity) {
-              emailData.from = [{ email: args.identity }];
+              resolvedIdentity = await resolveIdentity(jam, accountId, args.identity);
+              if (!resolvedIdentity) {
+                return mcpResponse(
+                  errorResponse(
+                    new Error(`Could not find identity: ${args.identity}`),
+                    { suggestion: "Use the 'identities' tool to list available identities." }
+                  ),
+                );
+              }
+              emailData.from = [{
+                email: resolvedIdentity.email,
+                name: resolvedIdentity.name ?? undefined,
+              }];
             }
 
             // Create the email
@@ -793,8 +816,13 @@ export function registerTools(
             }, JMAP_OPTIONS);
 
             if (!emailResult.created?.email) {
+              const createError = emailResult.notCreated?.email;
               return mcpResponse(
-                errorResponse(new Error("Failed to create email")),
+                errorResponse(
+                  new Error(
+                    `Failed to create email: ${JSON.stringify(createError)}`,
+                  ),
+                ),
               );
             }
 
@@ -808,23 +836,47 @@ export function registerTools(
               }));
             }
 
-            // Submit the email
+            // Resolve sent mailbox for moving email after submission
+            const sentMailbox = await resolveMailbox(jam, accountId, "sent");
+            if (!sentMailbox) {
+              return mcpResponse(
+                errorResponse(new Error("Could not find Sent mailbox")),
+              );
+            }
+
+            // Submit the email with instructions to move to Sent on success
             const [submissionResult] = await jam.api.EmailSubmission.set({
               accountId,
               create: {
                 submission: {
                   emailId,
-                  identityId: args.identity,
+                  identityId: resolvedIdentity?.id,
+                },
+              },
+              // On successful submission, move to Sent and remove draft keyword
+              onSuccessUpdateEmail: {
+                "#submission": {
+                  mailboxIds: { [sentMailbox.id]: true },
+                  "keywords/$draft": null,
                 },
               },
             }, JMAP_OPTIONS);
 
-            const sent = !!submissionResult.created?.submission;
+            if (!submissionResult.created?.submission) {
+              const submitError = submissionResult.notCreated?.submission;
+              return mcpResponse(
+                errorResponse(
+                  new Error(
+                    `Email created but submission failed: ${JSON.stringify(submitError)}`,
+                  ),
+                ),
+              );
+            }
 
             return mcpResponse(successResponse({
-              sent,
+              sent: true,
               id: emailId,
-              submission_id: submissionResult.created?.submission?.id,
+              submission_id: submissionResult.created.submission.id,
             }));
           } catch (error) {
             return mcpResponse(errorResponse(error));

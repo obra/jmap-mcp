@@ -306,6 +306,69 @@ export const getMailboxName = async (
 };
 
 // =============================================================================
+// Identity Resolution
+// =============================================================================
+
+export interface ResolvedIdentity {
+  id: string;
+  email: string;
+  name: string | null;
+}
+
+interface IdentityLike {
+  id: string;
+  email: string;
+  name?: string | null;
+}
+
+let identityCache: Map<string, IdentityLike> | null = null;
+let identityCacheAccountId: string | null = null;
+
+export const clearIdentityCache = () => {
+  identityCache = null;
+  identityCacheAccountId = null;
+};
+
+export const resolveIdentity = async (
+  jam: JamClient,
+  accountId: string,
+  emailOrId: string,
+): Promise<ResolvedIdentity | null> => {
+  // Refresh cache if needed
+  if (identityCache === null || identityCacheAccountId !== accountId) {
+    const [queryResult] = await jam.api.Identity.query({
+      accountId,
+      limit: 100,
+    }, JMAP_OPTIONS);
+
+    const [identities] = await jam.api.Identity.get({
+      accountId,
+      ids: queryResult.ids,
+    }, JMAP_OPTIONS);
+
+    identityCache = new Map(identities.list.map((i: IdentityLike) => [i.id, i]));
+    identityCacheAccountId = accountId;
+  }
+
+  const input = emailOrId.toLowerCase();
+
+  // Check if it's an ID
+  const byId = identityCache.get(emailOrId);
+  if (byId) {
+    return { id: byId.id, email: byId.email, name: byId.name ?? null };
+  }
+
+  // Check by email (case-insensitive)
+  for (const identity of identityCache.values()) {
+    if (identity.email.toLowerCase() === input) {
+      return { id: identity.id, email: identity.email, name: identity.name ?? null };
+    }
+  }
+
+  return null;
+};
+
+// =============================================================================
 // Body Extraction
 // =============================================================================
 
