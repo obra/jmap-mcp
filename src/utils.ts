@@ -522,8 +522,63 @@ export const processAttachments = (
 // Response Formatting
 // =============================================================================
 
+// Strip null, undefined, and empty arrays from objects recursively
+const stripEmpty = (obj: unknown): unknown => {
+  if (obj === null || obj === undefined) return undefined;
+  if (Array.isArray(obj)) {
+    const filtered = obj.map(stripEmpty).filter((v) => v !== undefined);
+    return filtered.length > 0 ? filtered : undefined;
+  }
+  if (typeof obj === "object") {
+    const result: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(obj)) {
+      const stripped = stripEmpty(value);
+      if (stripped !== undefined) {
+        result[key] = stripped;
+      }
+    }
+    return Object.keys(result).length > 0 ? result : undefined;
+  }
+  return obj;
+};
+
+// Format response compactly - one line per array item, no pretty printing
 export const toJSON = (data: unknown): string => {
-  return JSON.stringify(data, null, 2);
+  const clean = stripEmpty(data);
+  if (!clean) return "{}";
+
+  // For responses with arrays, format each item on its own line
+  if (
+    typeof clean === "object" && clean !== null && "data" in clean &&
+    typeof (clean as Record<string, unknown>).data === "object"
+  ) {
+    const response = clean as { success?: boolean; data?: unknown; error?: string };
+    const dataObj = response.data as Record<string, unknown>;
+
+    // Find arrays in data and format them line-by-line
+    for (const [key, value] of Object.entries(dataObj)) {
+      if (Array.isArray(value) && value.length > 0) {
+        const lines = value.map((item) => JSON.stringify(item));
+
+        // Build metadata (other fields like total, has_more)
+        const meta: Record<string, unknown> = {};
+        for (const [k, v] of Object.entries(dataObj)) {
+          if (k !== key) meta[k] = v;
+        }
+        const metaStr = Object.keys(meta).length > 0
+          ? "," + JSON.stringify(meta).slice(1, -1)
+          : "";
+
+        const prefix = response.success !== undefined
+          ? `{"success":${response.success},"data":{"${key}":[`
+          : `{"data":{"${key}":[`;
+        const suffix = `]${metaStr}}}`;
+        return prefix + "\n" + lines.join(",\n") + "\n" + suffix;
+      }
+    }
+  }
+
+  return JSON.stringify(clean);
 };
 
 export const mcpResponse = (data: unknown) => ({
