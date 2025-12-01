@@ -46,7 +46,7 @@ const SearchSchema = z.object({
   flags: z.array(z.string()).optional().describe(
     'Filter by flags: ["read"], ["!read", "flagged"]. Use ! prefix to negate.',
   ),
-  thread: z.string().optional().describe("Get all messages in this thread"),
+  thread: z.string().optional().describe("Thread ID - returns all emails in this conversation"),
   after: z.string().optional().describe(
     'Emails after this date (ISO 8601, YYYY-MM-DD, "yesterday", "today")',
   ),
@@ -73,17 +73,21 @@ const SendSchema = z.object({
   to: z.array(z.string()).min(1).describe(
     'Recipients: ["email@example.com"] or ["Name <email@example.com>"]',
   ),
-  subject: z.string().describe("Email subject"),
+  subject: z.string().optional().describe(
+    "Email subject (auto-generated for replies/forwards if omitted)",
+  ),
   body: z.string().describe("Email body (plain text)"),
   cc: z.array(z.string()).optional().describe("CC recipients"),
   bcc: z.array(z.string()).optional().describe("BCC recipients"),
   in_reply_to: z.string().optional().describe(
-    "Email ID to reply to (handles threading automatically)",
+    "Email ID to reply to (auto-sets subject and threading headers)",
   ),
   forward_of: z.string().optional().describe(
-    "Email ID to forward (includes original)",
+    "Email ID to forward (auto-sets subject and includes original)",
   ),
-  identity: z.string().optional().describe("Identity/from address to use"),
+  identity: z.string().describe(
+    "Identity/from address to send from (email address or identity ID)",
+  ),
   draft: z.boolean().default(false).describe(
     "Save as draft instead of sending",
   ),
@@ -133,12 +137,20 @@ interface SearchResult {
 interface ShowResult {
   id: string;
   thread_id: string;
+  message_id: string | null;
   subject: string;
   from: string;
   to: string[];
   cc: string[];
+  reply_to: string[];
   date: string;
   flags: string[];
+  headers: {
+    list_unsubscribe?: string;
+    list_id?: string;
+    precedence?: string;
+    auto_submitted?: string;
+  };
   body: string;
   body_truncated: boolean;
   body_source: "text" | "html" | "preview";
@@ -179,7 +191,13 @@ export function registerTools(
   // ---------------------------------------------------------------------------
   server.tool(
     "search",
-    "Search emails. Returns summaries with subject, from, date, preview, flags. Supports flexible date formats and mailbox names.",
+    `Search emails. Returns summaries with id, thread_id, subject, from, date, preview, flags, mailbox.
+
+Key features:
+- thread: Pass a thread_id to get ALL emails in a conversation
+- flags: Filter by any flag ["read", "!read", "flagged"] - use ! to negate
+- mailbox: Use names ("Inbox"), roles ("archive", "sent", "trash"), or IDs
+- dates: "yesterday", "today", "2024-01-15", or full ISO 8601`,
     SearchSchema.shape,
     async (args) => {
       try {
@@ -346,7 +364,11 @@ export function registerTools(
   // ---------------------------------------------------------------------------
   server.tool(
     "show",
-    "Get full email content including body. Bodies >25KB are truncated inline but cached in full to disk.",
+    `Get full email content with body and headers.
+
+Returns: id, thread_id, message_id, subject, from, to, cc, reply_to, date, flags, body, attachments
+Headers: list_unsubscribe, list_id, precedence, auto_submitted (for detecting mailing lists/automated mail)
+Bodies >25KB truncated inline but full version cached to ~/.cache/jmap-mcp/`,
     ShowSchema.shape,
     async (args) => {
       try {
@@ -356,10 +378,12 @@ export function registerTools(
           properties: [
             "id",
             "threadId",
+            "messageId",
             "subject",
             "from",
             "to",
             "cc",
+            "replyTo",
             "receivedAt",
             "keywords",
             "textBody",
@@ -367,6 +391,10 @@ export function registerTools(
             "bodyValues",
             "attachments",
             "hasAttachment",
+            "header:List-Unsubscribe:asText",
+            "header:List-Id:asText",
+            "header:Precedence:asText",
+            "header:Auto-Submitted:asText",
           ],
           fetchTextBodyValues: true,
           fetchHTMLBodyValues: args.format === "html",
@@ -419,15 +447,37 @@ export function registerTools(
           }),
         );
 
+        // Extract headers (JMAP returns them as header:Name:asText properties)
+        const headers: ShowResult["headers"] = {};
+        // deno-lint-ignore no-explicit-any
+        const emailAny = email as any;
+        if (emailAny["header:List-Unsubscribe:asText"]) {
+          headers.list_unsubscribe = emailAny["header:List-Unsubscribe:asText"];
+        }
+        if (emailAny["header:List-Id:asText"]) {
+          headers.list_id = emailAny["header:List-Id:asText"];
+        }
+        if (emailAny["header:Precedence:asText"]) {
+          headers.precedence = emailAny["header:Precedence:asText"];
+        }
+        if (emailAny["header:Auto-Submitted:asText"]) {
+          headers.auto_submitted = emailAny["header:Auto-Submitted:asText"];
+        }
+
         const showResult: ShowResult = {
           id: email.id,
           thread_id: email.threadId,
+          message_id: Array.isArray(email.messageId)
+            ? email.messageId[0]
+            : (email.messageId || null),
           subject: email.subject || "(no subject)",
           from: email.from?.[0] ? formatAddress(email.from[0]) : "",
           to: formatAddresses(email.to),
           cc: formatAddresses(email.cc),
+          reply_to: formatAddresses(email.replyTo),
           date: email.receivedAt || "",
           flags: formatFlags(email.keywords),
+          headers,
           body: body.text,
           body_truncated: body.truncated,
           body_source: body.source,
@@ -660,7 +710,12 @@ export function registerTools(
     if (hasSubmission) {
       server.tool(
         "send",
-        "Send email. Supports reply (in_reply_to) and forward (forward_of). Set draft=true to save without sending.",
+        `Send email. Requires identity (use identities tool to list available from addresses).
+
+- in_reply_to: Email ID to reply to - auto-generates "Re: subject" and sets threading headers
+- forward_of: Email ID to forward - auto-generates "Fwd: subject" and includes original
+- subject: Required for new emails, optional for replies/forwards (auto-generated)
+- draft: true to save as draft without sending`,
         SendSchema.shape,
         async (args) => {
           try {
@@ -668,10 +723,20 @@ export function registerTools(
             const cc = args.cc ? parseAddresses(args.cc) : undefined;
             const bcc = args.bcc ? parseAddresses(args.bcc) : undefined;
 
-            let subject = args.subject;
+            let subject = args.subject || "";
             let body = args.body;
             let inReplyTo: string[] | undefined;
             let references: string[] | undefined;
+
+            // Validate subject required for new emails (not replies/forwards)
+            if (!args.subject && !args.in_reply_to && !args.forward_of) {
+              return mcpResponse(
+                errorResponse(
+                  new Error("Subject is required for new emails"),
+                  { suggestion: "Provide subject, or use in_reply_to/forward_of for replies/forwards." }
+                ),
+              );
+            }
 
             // Handle reply
             if (args.in_reply_to) {

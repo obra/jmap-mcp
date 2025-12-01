@@ -54,21 +54,26 @@ const createServer = async () => {
 - \`search\` - Find emails with flexible filters. Returns summaries (id, subject, from, date, preview, flags).
   - Accepts mailbox names ("Inbox"), roles ("archive"), or IDs
   - Flexible dates: "yesterday", "2024-01-15", or full ISO 8601
-  - Flag filters: ["read"], ["!read", "flagged"]
+  - Flag filters: ["read"], ["!read", "flagged"] - supports any JMAP keyword
+  - thread: Get all emails in a thread by thread_id
 
-- \`show\` - Get full email with body. Bodies >25KB truncated inline, full version cached to ~/.cache/jmap-mcp/
+- \`show\` - Get full email with body and headers.
+  - Bodies >25KB truncated inline, full version cached to ~/.cache/jmap-mcp/
+  - Returns headers: list_unsubscribe, list_id, precedence, auto_submitted
+  - Includes message_id and reply_to for threading/unsubscribe
 
 - \`mailboxes\` - List folders with roles (inbox, archive, sent, trash) and message counts
 
-- \`identities\` - List available sending identities (from addresses)
+- \`identities\` - List available sending identities (required for send)
 
 - \`update\` - Bulk operations: add/remove flags, move to mailbox, archive, trash, or delete
   - Shortcuts: archive=true, trash=true
   - Accepts mailbox names/roles
 
-- \`send\` - Compose and send. Supports:
-  - in_reply_to: Email ID to reply to (auto-handles threading)
-  - forward_of: Email ID to forward (includes original)
+- \`send\` - Compose and send. Requires identity (email address).
+  - in_reply_to: Reply to email ID (auto-generates "Re: subject" and threading headers)
+  - forward_of: Forward email ID (auto-generates "Fwd: subject" and includes original)
+  - subject: Optional for replies/forwards (auto-generated), required for new emails
   - draft: true to save without sending
 
 **Flags:** read, flagged, replied, draft (no $ prefix needed)
