@@ -18,7 +18,8 @@
     "zod": "npm:zod@^3.22.0",
     "jmap-jam": "jsr:@htunnicliff/jmap-jam@^0.10.0",
     "@std/fs": "jsr:@std/fs@^1.0.0",
-    "@std/path": "jsr:@std/path@^1.0.0"
+    "@std/path": "jsr:@std/path@^1.0.0",
+    "@std/assert": "jsr:@std/assert@^1.0.0"
   },
   "repository": {
     "type": "git",
