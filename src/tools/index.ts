@@ -647,33 +647,29 @@ Bodies >25KB truncated inline but full version cached to ~/.cache/jmap-mcp/`,
           }
 
           for (const id of args.ids) {
-            const update: Partial<EmailCreate> = {};
+            const update: Record<string, unknown> = {};
 
-            // Handle flags
-            if (args.add_flags || args.remove_flags) {
-              const keywords: Record<string, boolean> = {};
-
-              if (args.add_flags) {
-                const { add } = parseFlags(args.add_flags);
-                Object.assign(keywords, add);
+            // Handle flags using JMAP patch syntax
+            if (args.add_flags) {
+              const { add } = parseFlags(args.add_flags);
+              for (const [keyword, value] of Object.entries(add)) {
+                update[`keywords/${keyword}`] = value;
               }
+            }
 
-              if (args.remove_flags) {
-                for (const flag of args.remove_flags) {
-                  const keyword = flag === "read"
-                    ? "$seen"
-                    : flag === "flagged"
-                    ? "$flagged"
-                    : flag === "replied"
-                    ? "$answered"
-                    : flag === "draft"
-                    ? "$draft"
-                    : `$${flag}`;
-                  keywords[keyword] = false;
-                }
+            if (args.remove_flags) {
+              for (const flag of args.remove_flags) {
+                const keyword = flag === "read"
+                  ? "$seen"
+                  : flag === "flagged"
+                  ? "$flagged"
+                  : flag === "replied"
+                  ? "$answered"
+                  : flag === "draft"
+                  ? "$draft"
+                  : `$${flag}`;
+                update[`keywords/${keyword}`] = null;
               }
-
-              update.keywords = keywords;
             }
 
             // Handle mailbox move
