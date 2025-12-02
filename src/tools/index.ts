@@ -23,7 +23,7 @@ import {
   resolveMailbox,
   toCSV,
   toRFC5322,
-} from "../utils.ts";
+} from "../utils.js";
 
 // =============================================================================
 // Schemas

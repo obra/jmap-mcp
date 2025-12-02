@@ -1,11 +1,14 @@
 # JMAP MCP Server
 
-[![JSR](https://jsr.io/badges/@wyattjoh/jmap-mcp)](https://jsr.io/@wyattjoh/jmap-mcp)
-[![JSR Score](https://jsr.io/badges/@wyattjoh/jmap-mcp/score)](https://jsr.io/@wyattjoh/jmap-mcp)
-[![JSR Scope](https://jsr.io/badges/@wyattjoh)](https://jsr.io/@wyattjoh)
-
 A Model Context Protocol (MCP) server that helps AI agents manage email through
-JMAP (JSON Meta Application Protocol) servers. Built with Deno.
+JMAP (JSON Meta Application Protocol) servers. Built with Node.js.
+
+## Origin
+
+This project originated from [@wyattjoh/jmap-mcp](https://github.com/wyattjoh/jmap-mcp)
+but has evolved into a different product with a distinct design philosophy. The
+original exposed raw JMAP APIs; this version is redesigned from the ground up for
+agent workflows. See the [design philosophy](#design-philosophy) section below.
 
 ## Design Philosophy
 
@@ -45,28 +48,27 @@ JMAP. Key principles:
 
 ### Prerequisites
 
-- [Deno](https://deno.land/) v1.40 or later
+- [Node.js](https://nodejs.org/) v18 or later
 - A JMAP-compliant email server
 - Valid JMAP authentication credentials
 
 ### Setup
 
-Add to your Claude Code MCP settings:
+1. Install the package:
+
+```bash
+npm install jmap-mcp
+```
+
+2. Add to your Claude Code MCP settings:
 
 ```json
 {
   "mcpServers": {
     "email": {
       "type": "stdio",
-      "command": "deno",
-      "args": [
-        "run",
-        "--allow-net",
-        "--allow-env=JMAP_SESSION_URL,JMAP_BEARER_TOKEN,JMAP_ACCOUNT_ID",
-        "--allow-read",
-        "--allow-write=$HOME/.cache/jmap-mcp",
-        "jsr:@wyattjoh/jmap-mcp"
-      ],
+      "command": "npx",
+      "args": ["-y", "jmap-mcp"],
       "env": {
         "JMAP_SESSION_URL": "https://api.fastmail.com/jmap/session",
         "JMAP_BEARER_TOKEN": "YOUR_API_TOKEN"
@@ -177,14 +179,17 @@ Works with any JMAP-compliant server:
 ## Development
 
 ```bash
+# Install dependencies
+npm install
+
+# Build
+npm run build
+
+# Run tests
+npm test
+
 # Run in development
-deno task watch
-
-# Lint and type check
-deno lint src/ && deno check src/mod.ts
-
-# Format
-deno fmt src/
+npm start
 ```
 
 ## License

@@ -1,0 +1,50 @@
+{
+  "name": "jmap-mcp",
+  "version": "0.2.0",
+  "description": "A Model Context Protocol (MCP) server for JMAP email management, redesigned for agent workflows",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/mod.js",
+  "bin": {
+    "jmap-mcp": "./dist/mod.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "esbuild src/mod.ts --bundle --platform=node --format=esm --outdir=dist --external:@modelcontextprotocol/sdk --external:jmap-jam --external:zod",
+    "start": "node dist/mod.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "tsc --noEmit --skipLibCheck",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "zod": "^3.22.0",
+    "jmap-jam": "^0.13.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.3.0",
+    "vitest": "^1.0.0",
+    "esbuild": "^0.24.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/fsck/jmap-mcp.git"
+  },
+  "keywords": [
+    "mcp",
+    "jmap",
+    "email",
+    "fastmail",
+    "ai",
+    "agent"
+  ]
+}

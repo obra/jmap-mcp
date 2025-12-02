@@ -1,11 +1,19 @@
+#!/usr/bin/env node
+
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import JamClient from "jmap-jam";
+import { readFileSync } from "fs";
+import { fileURLToPath } from "url";
+import { dirname, join } from "path";
 
-import deno from "../deno.json" with { type: "json" };
-import { registerTools } from "./tools/index.ts";
-import { formatError } from "./utils.ts";
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const pkg = JSON.parse(readFileSync(join(__dirname, "../package.json"), "utf-8"));
+
+import { registerTools } from "./tools/index.js";
+import { formatError } from "./utils.js";
 
 const JMAPConfigSchema = z.object({
   sessionUrl: z.string().url().describe("JMAP server session URL"),
@@ -16,9 +24,9 @@ const JMAPConfigSchema = z.object({
 });
 
 const getJMAPConfig = () => {
-  const sessionUrl = Deno.env.get("JMAP_SESSION_URL");
-  const bearerToken = Deno.env.get("JMAP_BEARER_TOKEN");
-  const accountId = Deno.env.get("JMAP_ACCOUNT_ID");
+  const sessionUrl = process.env.JMAP_SESSION_URL;
+  const bearerToken = process.env.JMAP_BEARER_TOKEN;
+  const accountId = process.env.JMAP_ACCOUNT_ID;
 
   if (!sessionUrl || !bearerToken) {
     throw new Error(
@@ -41,13 +49,13 @@ const createJAMClient = (config: z.infer<typeof JMAPConfigSchema>) => {
 };
 
 const createServer = async () => {
-  const server = new McpServer({
-    name: "jmap",
-    version: deno.version,
-    capabilities: {
-      tools: {},
+  const server = new McpServer(
+    {
+      name: "jmap",
+      version: pkg.version,
     },
-    instructions: `JMAP Email MCP - Manage email through JMAP-compliant servers.
+    {
+      instructions: `JMAP Email MCP - Manage email through JMAP-compliant servers.
 
 **Tools:**
 
@@ -124,16 +132,17 @@ const main = async () => {
     console.error(
       "Please check your JMAP_SESSION_URL and JMAP_BEARER_TOKEN environment variables.",
     );
-    Deno.exit(1);
+    process.exit(1);
   }
 
   await server.connect(transport);
   console.warn("JMAP MCP Server running on stdio");
 };
 
-if (import.meta.main) {
+// Run if this is the main module
+if (import.meta.url === `file://${process.argv[1]}`) {
   main().catch((error) => {
     console.error("Fatal error in main():", error);
-    Deno.exit(1);
+    process.exit(1);
   });
 }

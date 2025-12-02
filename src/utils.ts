@@ -1,8 +1,8 @@
 // @ts-nocheck - jmap-jam ProxyAPI types don't expose options param (runtime supports it)
 import type JamClient from "jmap-jam";
 import type { Email, EmailAddress, Mailbox } from "jmap-jam";
-import { ensureDir } from "@std/fs";
-import { join } from "@std/path";
+import { mkdir, writeFile } from "fs/promises";
+import { join } from "path";
 
 // JMAP requires core capability in all requests
 // deno-lint-ignore no-explicit-any
@@ -453,7 +453,7 @@ const htmlToText = (html: string): string => {
 // =============================================================================
 
 const getCacheDir = (): string => {
-  const home = Deno.env.get("HOME") || Deno.env.get("USERPROFILE") || "/tmp";
+  const home = process.env.HOME || process.env.USERPROFILE || "/tmp";
   return join(home, ".cache", "jmap-mcp");
 };
 
@@ -467,12 +467,12 @@ export const cacheEmailBody = async (
   source: "text" | "html",
 ): Promise<string> => {
   const dir = getEmailCacheDir(emailId);
-  await ensureDir(dir);
+  await mkdir(dir, { recursive: true });
 
   const filename = source === "html" ? "body.html" : "body.txt";
   const filepath = join(dir, filename);
 
-  await Deno.writeTextFile(filepath, body);
+  await writeFile(filepath, body, "utf-8");
   return filepath;
 };
 
