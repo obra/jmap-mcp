@@ -581,6 +581,7 @@ export const processAttachments = async (
   email: Email,
   jam: JamClient,
   accountId: string,
+  bearerToken: string,
 ): Promise<AttachmentInfo[]> => {
   if (!email.attachments || email.attachments.length === 0) {
     return [];
@@ -610,7 +611,7 @@ export const processAttachments = async (
         // Download the blob
         const response = await fetch(downloadUrl, {
           headers: {
-            "Authorization": `Bearer ${jam.bearerToken || ""}`,
+            "Authorization": `Bearer ${bearerToken}`,
           },
         });
 

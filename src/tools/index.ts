@@ -201,6 +201,7 @@ export function registerTools(
   server: McpServer,
   jam: JamClient,
   accountId: string,
+  bearerToken: string,
   isReadOnly: boolean,
   hasSubmission: boolean,
 ) {
@@ -436,7 +437,7 @@ Bodies >25KB truncated inline but full version cached to ~/.cache/jmap-mcp/`,
         }
 
         // Process attachments (auto-cache small ones <100KB)
-        const attachmentInfos = await processAttachments(email, jam, accountId);
+        const attachmentInfos = await processAttachments(email, jam, accountId, bearerToken);
         const attachments: ShowResult["attachments"] = attachmentInfos.map((info) => ({
           name: info.name,
           type: info.type,

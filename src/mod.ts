@@ -107,7 +107,7 @@ Works with FastMail, Cyrus IMAP, Stalwart Mail Server, Apache James, and other J
     "urn:ietf:params:jmap:submission" in session.capabilities &&
     !account.isReadOnly;
 
-  registerTools(server, jam, accountId, account.isReadOnly, hasSubmission);
+  registerTools(server, jam, accountId, config.bearerToken, account.isReadOnly, hasSubmission);
 
   console.warn("Registered JMAP email tools");
   if (hasSubmission) {
