@@ -3,6 +3,7 @@ import type JamClient from "jmap-jam";
 import type { Email, EmailAddress, Mailbox } from "jmap-jam";
 import { mkdir, writeFile } from "fs/promises";
 import { join } from "path";
+import TurndownService from "turndown";
 
 // JMAP requires core capability in all requests
 // deno-lint-ignore no-explicit-any
@@ -161,6 +162,59 @@ export const parseFlags = (
   }
 
   return { add, remove };
+};
+
+// Build JMAP filter from boolean flag expressions
+// Supports: ["read", "flagged"] = AND, ["read OR flagged"] = OR, ["!draft"] = NOT
+// Example: ["read OR flagged", "!draft"] = (read OR flagged) AND (!draft)
+export const buildFlagFilter = (
+  flags: string[],
+): Record<string, unknown> | null => {
+  if (!flags || flags.length === 0) return null;
+
+  const toJmapKeyword = (flag: string): string => {
+    return REVERSE_KEYWORD_MAP[flag] || `$${flag}`;
+  };
+
+  // Parse a single flag expression (may contain OR)
+  const parseExpression = (expr: string): Record<string, unknown> => {
+    const trimmed = expr.trim();
+    const isNegated = trimmed.startsWith("!");
+    const cleanExpr = isNegated ? trimmed.slice(1).trim() : trimmed;
+
+    // Check for OR operator
+    if (cleanExpr.includes(" OR ")) {
+      const parts = cleanExpr.split(" OR ").map((p) => p.trim());
+      const conditions = parts.map((part) => ({
+        hasKeyword: toJmapKeyword(part),
+      }));
+
+      const orFilter = {
+        operator: "OR",
+        conditions,
+      };
+
+      return isNegated ? { operator: "NOT", conditions: [orFilter] } : orFilter;
+    }
+
+    // Single flag
+    const keyword = toJmapKeyword(cleanExpr);
+    return isNegated
+      ? { notKeyword: keyword }
+      : { hasKeyword: keyword };
+  };
+
+  // If single flag expression, return it directly
+  if (flags.length === 1) {
+    return parseExpression(flags[0]);
+  }
+
+  // Multiple expressions - combine with AND
+  const conditions = flags.map(parseExpression);
+  return {
+    operator: "AND",
+    conditions,
+  };
 };
 
 // =============================================================================
@@ -430,22 +484,60 @@ export const extractBodyText = (email: Email): ExtractedBody => {
   };
 };
 
+// Create a configured Turndown instance for secure HTML-to-markdown conversion
+// This helps prevent prompt injection by normalizing HTML to markdown
+const createTurndownService = (): TurndownService => {
+  const turndown = new TurndownService({
+    headingStyle: "atx",
+    codeBlockStyle: "fenced",
+    bulletListMarker: "-",
+    emDelimiter: "*",
+  });
+
+  // Remove potentially dangerous elements
+  turndown.remove(["script", "style", "iframe", "object", "embed"]);
+
+  // Sanitize links to prevent data exfiltration
+  turndown.addRule("sanitizeLinks", {
+    filter: "a",
+    replacement: (content, node) => {
+      const href = (node as HTMLAnchorElement).getAttribute("href");
+      // Remove javascript: and data: URLs
+      if (!href || href.match(/^(javascript|data):/i)) {
+        return content;
+      }
+      return `[${content}](${href})`;
+    },
+  });
+
+  return turndown;
+};
+
+let turndownInstance: TurndownService | null = null;
+
 const htmlToText = (html: string): string => {
-  return html
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<\/p>/gi, "\n\n")
-    .replace(/<\/div>/gi, "\n")
-    .replace(/<\/li>/gi, "\n")
-    .replace(/<li[^>]*>/gi, "• ")
-    .replace(/<[^>]+>/g, "")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&amp;/g, "&")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
+  if (!turndownInstance) {
+    turndownInstance = createTurndownService();
+  }
+
+  try {
+    // Convert HTML to markdown, then clean up excessive newlines
+    const markdown = turndownInstance.turndown(html);
+    return markdown
+      .replace(/\n{3,}/g, "\n\n") // Collapse multiple newlines
+      .trim();
+  } catch (error) {
+    // Fallback to basic HTML stripping if turndown fails
+    return html
+      .replace(/<[^>]+>/g, "")
+      .replace(/&nbsp;/g, " ")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&amp;/g, "&")
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .trim();
+  }
 };
 
 // =============================================================================
@@ -485,11 +577,11 @@ export interface AttachmentInfo {
   cachePath?: string;
 }
 
-export const processAttachments = (
+export const processAttachments = async (
   email: Email,
-  _jam: JamClient,
-  _accountId: string,
-): AttachmentInfo[] => {
+  jam: JamClient,
+  accountId: string,
+): Promise<AttachmentInfo[]> => {
   if (!email.attachments || email.attachments.length === 0) {
     return [];
   }
@@ -505,11 +597,43 @@ export const processAttachments = (
       cached: false,
     };
 
-    // For now, just mark as cached: false
-    // TODO: Implement actual blob download for small attachments
-    if (att.size && att.size < ATTACHMENT_CACHE_SIZE) {
-      // Would download and cache here
-      info.cached = false; // Not implemented yet
+    // Auto-download and cache small attachments (<100KB)
+    if (att.size && att.size < ATTACHMENT_CACHE_SIZE && att.blobId) {
+      try {
+        const session = await jam.session;
+        const downloadUrl = session.downloadUrl
+          .replace("{accountId}", accountId)
+          .replace("{blobId}", att.blobId)
+          .replace("{name}", encodeURIComponent(att.name || "attachment"))
+          .replace("{type}", encodeURIComponent(att.type || "application/octet-stream"));
+
+        // Download the blob
+        const response = await fetch(downloadUrl, {
+          headers: {
+            "Authorization": `Bearer ${jam.bearerToken || ""}`,
+          },
+        });
+
+        if (response.ok) {
+          const buffer = await response.arrayBuffer();
+
+          // Save to cache
+          const attachmentDir = join(getEmailCacheDir(email.id), "attachments");
+          await mkdir(attachmentDir, { recursive: true });
+
+          const sanitizedName = (att.name || "attachment")
+            .replace(/[^a-zA-Z0-9._-]/g, "_"); // Sanitize filename
+          const filepath = join(attachmentDir, sanitizedName);
+
+          await writeFile(filepath, Buffer.from(buffer));
+
+          info.cached = true;
+          info.cachePath = filepath;
+        }
+      } catch (error) {
+        // If download fails, continue without caching
+        // The attachment metadata is still returned
+      }
     }
 
     results.push(info);

@@ -5,6 +5,7 @@ import type JamClient from "jmap-jam";
 import type { Email, EmailCreate } from "jmap-jam";
 
 import {
+  buildFlagFilter,
   cacheEmailBody,
   extractBodyText,
   formatAddress,
@@ -19,6 +20,7 @@ import {
   parseAddresses,
   parseFlags,
   parseFlexibleDate,
+  processAttachments,
   resolveIdentity,
   resolveMailbox,
   toCSV,
@@ -171,7 +173,7 @@ interface ShowResult {
   body_truncated: boolean;
   body_source: "text" | "html" | "preview";
   cache_path: string;
-  attachments: { name: string; type: string; size: number }[];
+  attachments: { name: string; type: string; size: number; cached?: boolean; cachePath?: string }[];
 }
 
 interface MailboxResult {
@@ -241,25 +243,20 @@ Key features:
           filter.inMailbox = resolved.id;
         }
 
-        // Handle flags filter
+        // Handle flags filter with boolean logic support
         if (args.flags && args.flags.length > 0) {
-          for (const flag of args.flags) {
-            const isNegated = flag.startsWith("!");
-            const cleanFlag = isNegated ? flag.slice(1) : flag;
-            const keyword = cleanFlag === "read"
-              ? "$seen"
-              : cleanFlag === "flagged"
-              ? "$flagged"
-              : cleanFlag === "replied"
-              ? "$answered"
-              : cleanFlag === "draft"
-              ? "$draft"
-              : `$${cleanFlag}`;
-
-            if (isNegated) {
-              filter.notKeyword = keyword;
+          const flagFilter = buildFlagFilter(args.flags);
+          if (flagFilter) {
+            // Merge flag filter into main filter
+            if (Object.keys(filter).length === 0) {
+              // No other filters, use flag filter directly
+              Object.assign(filter, flagFilter);
             } else {
-              filter.hasKeyword = keyword;
+              // Combine with existing filters using AND
+              const existingFilter = { ...filter };
+              Object.keys(filter).forEach((key) => delete filter[key]);
+              filter.operator = "AND";
+              filter.conditions = [existingFilter, flagFilter];
             }
           }
         }
@@ -441,14 +438,15 @@ Bodies >25KB truncated inline but full version cached to ~/.cache/jmap-mcp/`,
           // Caching failed, continue without cache
         }
 
-        // Process attachments
-        const attachments: ShowResult["attachments"] = (email.attachments || []).map(
-          (att) => ({
-            name: att.name || "unnamed",
-            type: att.type || "application/octet-stream",
-            size: att.size || 0,
-          }),
-        );
+        // Process attachments (auto-cache small ones <100KB)
+        const attachmentInfos = await processAttachments(email, jam, accountId);
+        const attachments: ShowResult["attachments"] = attachmentInfos.map((info) => ({
+          name: info.name,
+          type: info.type,
+          size: info.size,
+          cached: info.cached,
+          cachePath: info.cachePath,
+        }));
 
         // Extract headers (JMAP returns them as header:Name:asText properties)
         const headers: ShowResult["headers"] = {};

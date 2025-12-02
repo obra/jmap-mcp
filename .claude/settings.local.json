@@ -14,7 +14,12 @@
       "Bash(git pull:*)",
       "Bash(git commit:*)",
       "Bash(deno check:*)",
-      "Bash(deno test:*)"
+      "Bash(deno test:*)",
+      "Bash(npm install:*)",
+      "Bash(npm search:*)",
+      "Bash(npm run build:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npm test:*)"
     ],
     "deny": [],
     "ask": []
