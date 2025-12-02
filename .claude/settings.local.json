@@ -12,7 +12,8 @@
       "Bash(git commit -m \"$(cat <<''EOF''\nRedesign MCP for agent workflows, not raw JMAP exposure\n\nBreaking change: Complete API redesign focused on helping agents work with\nemail rather than exposing raw JMAP protocol.\n\nNew tools (6 total, down from 9):\n- search: Returns summaries with preview, flags, mailbox - not just IDs\n- show: Returns actual body text, truncates >25KB, caches full to disk\n- mailboxes: Lists folders with roles and counts\n- identities: Lists sending identities\n- update: Bulk ops with archive/trash shortcuts\n- send: Compose/reply/forward with in_reply_to, forward_of, draft mode\n\nKey improvements:\n- One call = useful data (no more search → get_emails → still no body)\n- Flexible mailbox input: names (\"Inbox\"), roles (\"archive\"), or IDs\n- Flexible dates: \"yesterday\", \"2024-01-15\", or full ISO 8601\n- Human-friendly flags: [\"read\", \"flagged\"] not [\"$seen\", \"$flagged\"]\n- Bodies always included and truncated sanely (25KB inline, full cached)\n- Helpful error messages with recovery suggestions\n\nInspired by https://blog.fsck.com/2025/10/19/mcps-are-not-like-other-apis/\nEOF\n)\")",
       "Bash(cat:*)",
       "Bash(git pull:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(deno check:*)"
     ],
     "deny": [],
     "ask": []

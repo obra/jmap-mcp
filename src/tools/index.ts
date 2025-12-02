@@ -4,13 +4,13 @@ import { z } from "zod";
 import type JamClient from "jmap-jam";
 import type { Email, EmailCreate } from "jmap-jam";
 
-import type { AttachmentInfo } from "../utils.ts";
 import {
   cacheEmailBody,
-  errorResponse,
   extractBodyText,
   formatAddress,
   formatAddresses,
+  formatError,
+  formatErrorText,
   formatFlags,
   getEmailCacheDir,
   getMailboxName,
@@ -21,7 +21,8 @@ import {
   parseFlexibleDate,
   resolveIdentity,
   resolveMailbox,
-  successResponse,
+  toCSV,
+  toRFC5322,
 } from "../utils.ts";
 
 // =============================================================================
@@ -118,8 +119,23 @@ const MailboxesSchema = z.object({
 const IdentitiesSchema = z.object({});
 
 // =============================================================================
-// Response Types
+// Response Types & CSV Columns
 // =============================================================================
+
+// CSV column definitions for each response type
+const SEARCH_COLUMNS = [
+  "id",
+  "thread_id",
+  "date",
+  "from",
+  "subject",
+  "flags",
+  "mailbox",
+  "has_attachment",
+  "preview",
+];
+const MAILBOX_COLUMNS = ["id", "name", "role", "parent_id", "unread", "total"];
+const IDENTITY_COLUMNS = ["id", "name", "email", "reply_to", "is_default"];
 
 interface SearchResult {
   id: string;
@@ -155,7 +171,7 @@ interface ShowResult {
   body_truncated: boolean;
   body_source: "text" | "html" | "preview";
   cache_path: string;
-  attachments: AttachmentInfo[];
+  attachments: { name: string; type: string; size: number }[];
 }
 
 interface MailboxResult {
@@ -217,12 +233,10 @@ Key features:
         if (args.mailbox) {
           const resolved = await resolveMailbox(jam, accountId, args.mailbox);
           if (!resolved) {
-            return mcpResponse(
-              errorResponse(new Error(`Mailbox not found: ${args.mailbox}`), {
-                suggestion:
-                  'Use the "mailboxes" tool to see available mailboxes.',
-              }),
-            );
+            return mcpResponse(formatErrorText(
+              `Mailbox not found: ${args.mailbox}`,
+              'Use "mailboxes" tool to list available mailboxes',
+            ));
           }
           filter.inMailbox = resolved.id;
         }
@@ -267,9 +281,7 @@ Key features:
           }, JMAP_OPTIONS);
 
           if (threadResult.list.length === 0) {
-            return mcpResponse(
-              errorResponse(new Error(`Thread not found: ${args.thread}`)),
-            );
+            return mcpResponse(formatErrorText(`Thread not found: ${args.thread}`));
           }
 
           const emailIds = threadResult.list[0].emailIds;
@@ -299,11 +311,7 @@ Key features:
             ),
           );
 
-          return mcpResponse(successResponse({
-            emails: results,
-            total: results.length,
-            has_more: false,
-          }));
+          return mcpResponse(toCSV(results, SEARCH_COLUMNS));
         }
 
         // Regular search
@@ -316,10 +324,8 @@ Key features:
         }, JMAP_OPTIONS);
 
         if (queryResult.ids.length === 0) {
-          return mcpResponse(successResponse({
-            emails: [],
+          return mcpResponse(toCSV([], SEARCH_COLUMNS, {
             total: queryResult.total || 0,
-            has_more: false,
           }));
         }
 
@@ -347,14 +353,14 @@ Key features:
           ),
         );
 
-        return mcpResponse(successResponse({
-          emails: results,
+        const hasMore = (queryResult.position || 0) + results.length <
+          (queryResult.total || 0);
+        return mcpResponse(toCSV(results, SEARCH_COLUMNS, {
           total: queryResult.total || results.length,
-          has_more: (queryResult.position || 0) + results.length <
-            (queryResult.total || 0),
+          ...(hasMore && { has_more: true }),
         }));
       } catch (error) {
-        return mcpResponse(errorResponse(error));
+        return mcpResponse(formatErrorText(formatError(error)));
       }
     },
   );
@@ -401,11 +407,10 @@ Bodies >25KB truncated inline but full version cached to ~/.cache/jmap-mcp/`,
         }, JMAP_OPTIONS);
 
         if (result.list.length === 0) {
-          return mcpResponse(
-            errorResponse(new Error(`Email not found: ${args.id}`), {
-              suggestion: "The email may have been deleted or moved.",
-            }),
-          );
+          return mcpResponse(formatErrorText(
+            `Email not found: ${args.id}`,
+            "The email may have been deleted or moved",
+          ));
         }
 
         const email = result.list[0];
@@ -437,13 +442,11 @@ Bodies >25KB truncated inline but full version cached to ~/.cache/jmap-mcp/`,
         }
 
         // Process attachments
-        const attachments: AttachmentInfo[] = (email.attachments || []).map(
+        const attachments: ShowResult["attachments"] = (email.attachments || []).map(
           (att) => ({
             name: att.name || "unnamed",
             type: att.type || "application/octet-stream",
             size: att.size || 0,
-            blobId: att.blobId || "",
-            cached: false,
           }),
         );
 
@@ -485,9 +488,9 @@ Bodies >25KB truncated inline but full version cached to ~/.cache/jmap-mcp/`,
           attachments,
         };
 
-        return mcpResponse(successResponse(showResult));
+        return mcpResponse(toRFC5322(showResult));
       } catch (error) {
-        return mcpResponse(errorResponse(error));
+        return mcpResponse(formatErrorText(formatError(error)));
       }
     },
   );
@@ -531,9 +534,9 @@ Bodies >25KB truncated inline but full version cached to ~/.cache/jmap-mcp/`,
           total: m.totalEmails || 0,
         }));
 
-        return mcpResponse(successResponse({ mailboxes: results }));
+        return mcpResponse(toCSV(results, MAILBOX_COLUMNS));
       } catch (error) {
-        return mcpResponse(errorResponse(error));
+        return mcpResponse(formatErrorText(formatError(error)));
       }
     },
   );
@@ -566,9 +569,9 @@ Bodies >25KB truncated inline but full version cached to ~/.cache/jmap-mcp/`,
             is_default: idx === 0, // First is typically default
           }));
 
-          return mcpResponse(successResponse({ identities: results }));
+          return mcpResponse(toCSV(results, IDENTITY_COLUMNS));
         } catch (error) {
-          return mcpResponse(errorResponse(error));
+          return mcpResponse(formatErrorText(formatError(error)));
         }
       },
     );
@@ -594,15 +597,12 @@ Bodies >25KB truncated inline but full version cached to ~/.cache/jmap-mcp/`,
               destroy: args.ids,
             }, JMAP_OPTIONS);
 
-            return mcpResponse(successResponse({
-              deleted: result.destroyed?.length || 0,
-              failed: Object.entries(result.notDestroyed || {}).map((
-                [id, err],
-              ) => ({
-                id,
-                error: String(err),
-              })),
-            }));
+            const deleted = result.destroyed?.length || 0;
+            const failed = Object.keys(result.notDestroyed || {});
+            if (failed.length > 0) {
+              return mcpResponse(`Deleted ${deleted} emails, ${failed.length} failed: ${failed.join(", ")}`);
+            }
+            return mcpResponse(`Deleted ${deleted} emails`);
           }
 
           // Build updates
@@ -614,34 +614,28 @@ Bodies >25KB truncated inline but full version cached to ~/.cache/jmap-mcp/`,
           if (args.archive) {
             const resolved = await resolveMailbox(jam, accountId, "archive");
             if (!resolved) {
-              return mcpResponse(
-                errorResponse(new Error("Archive mailbox not found"), {
-                  suggestion:
-                    'Use the "mailboxes" tool to find available mailboxes.',
-                }),
-              );
+              return mcpResponse(formatErrorText(
+                "Archive mailbox not found",
+                'Use "mailboxes" tool to find available mailboxes',
+              ));
             }
             targetMailboxId = resolved.id;
           } else if (args.trash) {
             const resolved = await resolveMailbox(jam, accountId, "trash");
             if (!resolved) {
-              return mcpResponse(
-                errorResponse(new Error("Trash mailbox not found"), {
-                  suggestion:
-                    'Use the "mailboxes" tool to find available mailboxes.',
-                }),
-              );
+              return mcpResponse(formatErrorText(
+                "Trash mailbox not found",
+                'Use "mailboxes" tool to find available mailboxes',
+              ));
             }
             targetMailboxId = resolved.id;
           } else if (args.move_to) {
             const resolved = await resolveMailbox(jam, accountId, args.move_to);
             if (!resolved) {
-              return mcpResponse(
-                errorResponse(new Error(`Mailbox not found: ${args.move_to}`), {
-                  suggestion:
-                    'Use the "mailboxes" tool to find available mailboxes.',
-                }),
-              );
+              return mcpResponse(formatErrorText(
+                `Mailbox not found: ${args.move_to}`,
+                'Use "mailboxes" tool to find available mailboxes',
+              ));
             }
             targetMailboxId = resolved.id;
           }
@@ -689,17 +683,14 @@ Bodies >25KB truncated inline but full version cached to ~/.cache/jmap-mcp/`,
             update: updates,
           }, JMAP_OPTIONS);
 
-          return mcpResponse(successResponse({
-            updated: Object.keys(result.updated || {}).length,
-            failed: Object.entries(result.notUpdated || {}).map((
-              [id, err],
-            ) => ({
-              id,
-              error: String(err),
-            })),
-          }));
+          const updated = Object.keys(result.updated || {}).length;
+          const failed = Object.keys(result.notUpdated || {});
+          if (failed.length > 0) {
+            return mcpResponse(`Updated ${updated} emails, ${failed.length} failed: ${failed.join(", ")}`);
+          }
+          return mcpResponse(`Updated ${updated} emails`);
         } catch (error) {
-          return mcpResponse(errorResponse(error));
+          return mcpResponse(formatErrorText(formatError(error)));
         }
       },
     );
@@ -730,12 +721,10 @@ Bodies >25KB truncated inline but full version cached to ~/.cache/jmap-mcp/`,
 
             // Validate subject required for new emails (not replies/forwards)
             if (!args.subject && !args.in_reply_to && !args.forward_of) {
-              return mcpResponse(
-                errorResponse(
-                  new Error("Subject is required for new emails"),
-                  { suggestion: "Provide subject, or use in_reply_to/forward_of for replies/forwards." }
-                ),
-              );
+              return mcpResponse(formatErrorText(
+                "Subject is required for new emails",
+                "Provide subject, or use in_reply_to/forward_of for replies/forwards",
+              ));
             }
 
             // Handle reply
@@ -831,9 +820,7 @@ Bodies >25KB truncated inline but full version cached to ~/.cache/jmap-mcp/`,
             // Resolve drafts mailbox for email creation
             const draftsMailbox = await resolveMailbox(jam, accountId, "drafts");
             if (!draftsMailbox) {
-              return mcpResponse(
-                errorResponse(new Error("Could not find Drafts mailbox")),
-              );
+              return mcpResponse(formatErrorText("Could not find Drafts mailbox"));
             }
 
             // Build email
@@ -856,23 +843,18 @@ Bodies >25KB truncated inline but full version cached to ~/.cache/jmap-mcp/`,
               references,
             };
 
-            // Resolve identity if provided
-            let resolvedIdentity: { id: string; email: string; name: string | null } | null = null;
-            if (args.identity) {
-              resolvedIdentity = await resolveIdentity(jam, accountId, args.identity);
-              if (!resolvedIdentity) {
-                return mcpResponse(
-                  errorResponse(
-                    new Error(`Could not find identity: ${args.identity}`),
-                    { suggestion: "Use the 'identities' tool to list available identities." }
-                  ),
-                );
-              }
-              emailData.from = [{
-                email: resolvedIdentity.email,
-                name: resolvedIdentity.name ?? undefined,
-              }];
+            // Resolve identity
+            const resolvedIdentity = await resolveIdentity(jam, accountId, args.identity);
+            if (!resolvedIdentity) {
+              return mcpResponse(formatErrorText(
+                `Could not find identity: ${args.identity}`,
+                'Use "identities" tool to list available identities',
+              ));
             }
+            emailData.from = [{
+              email: resolvedIdentity.email,
+              name: resolvedIdentity.name ?? undefined,
+            }];
 
             // Create the email
             const [emailResult] = await jam.api.Email.set({
@@ -882,31 +864,22 @@ Bodies >25KB truncated inline but full version cached to ~/.cache/jmap-mcp/`,
 
             if (!emailResult.created?.email) {
               const createError = emailResult.notCreated?.email;
-              return mcpResponse(
-                errorResponse(
-                  new Error(
-                    `Failed to create email: ${JSON.stringify(createError)}`,
-                  ),
-                ),
-              );
+              return mcpResponse(formatErrorText(
+                `Failed to create email: ${JSON.stringify(createError)}`,
+              ));
             }
 
             const emailId = emailResult.created.email.id;
 
             // If draft mode, return without sending
             if (args.draft) {
-              return mcpResponse(successResponse({
-                drafted: true,
-                id: emailId,
-              }));
+              return mcpResponse(`Draft saved: ${emailId}`);
             }
 
             // Resolve sent mailbox for moving email after submission
             const sentMailbox = await resolveMailbox(jam, accountId, "sent");
             if (!sentMailbox) {
-              return mcpResponse(
-                errorResponse(new Error("Could not find Sent mailbox")),
-              );
+              return mcpResponse(formatErrorText("Could not find Sent mailbox"));
             }
 
             // Submit the email with instructions to move to Sent on success
@@ -915,7 +888,7 @@ Bodies >25KB truncated inline but full version cached to ~/.cache/jmap-mcp/`,
               create: {
                 submission: {
                   emailId,
-                  identityId: resolvedIdentity?.id,
+                  identityId: resolvedIdentity.id,
                 },
               },
               // On successful submission, move to Sent and remove draft keyword
@@ -929,22 +902,14 @@ Bodies >25KB truncated inline but full version cached to ~/.cache/jmap-mcp/`,
 
             if (!submissionResult.created?.submission) {
               const submitError = submissionResult.notCreated?.submission;
-              return mcpResponse(
-                errorResponse(
-                  new Error(
-                    `Email created but submission failed: ${JSON.stringify(submitError)}`,
-                  ),
-                ),
-              );
+              return mcpResponse(formatErrorText(
+                `Email created but submission failed: ${JSON.stringify(submitError)}`,
+              ));
             }
 
-            return mcpResponse(successResponse({
-              sent: true,
-              id: emailId,
-              submission_id: submissionResult.created.submission.id,
-            }));
+            return mcpResponse(`Sent: ${emailId}`);
           } catch (error) {
-            return mcpResponse(errorResponse(error));
+            return mcpResponse(formatErrorText(formatError(error)));
           }
         },
       );

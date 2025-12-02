@@ -522,65 +522,146 @@ export const processAttachments = (
 // Response Formatting
 // =============================================================================
 
-// Strip null, undefined, and empty arrays from objects recursively
-const stripEmpty = (obj: unknown): unknown => {
-  if (obj === null || obj === undefined) return undefined;
-  if (Array.isArray(obj)) {
-    const filtered = obj.map(stripEmpty).filter((v) => v !== undefined);
-    return filtered.length > 0 ? filtered : undefined;
+// Escape a value for CSV (quote if contains comma, quote, or newline)
+const csvEscape = (val: unknown): string => {
+  if (val === null || val === undefined) return "";
+  const str = Array.isArray(val) ? val.join(";") : String(val);
+  if (str.includes(",") || str.includes('"') || str.includes("\n")) {
+    return `"${str.replace(/"/g, '""')}"`;
   }
-  if (typeof obj === "object") {
-    const result: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(obj)) {
-      const stripped = stripEmpty(value);
-      if (stripped !== undefined) {
-        result[key] = stripped;
-      }
-    }
-    return Object.keys(result).length > 0 ? result : undefined;
-  }
-  return obj;
+  return str;
 };
 
-// Format response compactly - one line per array item, no pretty printing
+// Format array of objects as CSV
+export const toCSV = (
+  rows: Record<string, unknown>[],
+  columns: string[],
+  meta?: Record<string, unknown>,
+): string => {
+  if (rows.length === 0) return columns.join(",") + "\n(no results)";
+
+  const header = columns.join(",");
+  const dataRows = rows.map((row) =>
+    columns.map((col) => csvEscape(row[col])).join(",")
+  );
+
+  let result = header + "\n" + dataRows.join("\n");
+
+  // Append metadata if present
+  if (meta && Object.keys(meta).length > 0) {
+    const metaParts = Object.entries(meta)
+      .map(([k, v]) => `${k}=${v}`)
+      .join(" ");
+    result += `\n# ${metaParts}`;
+  }
+
+  return result;
+};
+
+// Format email in RFC 5322 style
+export const toRFC5322 = (email: {
+  id: string;
+  thread_id: string;
+  message_id?: string | null;
+  subject: string;
+  from: string;
+  to: string[];
+  cc?: string[];
+  reply_to?: string[];
+  date: string;
+  flags: string[];
+  headers?: {
+    list_unsubscribe?: string;
+    list_id?: string;
+    precedence?: string;
+    auto_submitted?: string;
+  };
+  body: string;
+  body_truncated?: boolean;
+  body_source?: string;
+  cache_path?: string;
+  attachments?: { name: string; type: string; size: number }[];
+}): string => {
+  const lines: string[] = [];
+
+  // Standard headers
+  if (email.message_id) lines.push(`Message-ID: ${email.message_id}`);
+  lines.push(`X-JMAP-Id: ${email.id}`);
+  lines.push(`X-Thread-Id: ${email.thread_id}`);
+  lines.push(`Date: ${email.date}`);
+  lines.push(`From: ${email.from}`);
+  if (email.to.length > 0) lines.push(`To: ${email.to.join(", ")}`);
+  if (email.cc && email.cc.length > 0) lines.push(`Cc: ${email.cc.join(", ")}`);
+  if (email.reply_to && email.reply_to.length > 0) {
+    lines.push(`Reply-To: ${email.reply_to.join(", ")}`);
+  }
+  lines.push(`Subject: ${email.subject}`);
+
+  // Flags as custom header
+  if (email.flags.length > 0) {
+    lines.push(`X-Flags: ${email.flags.join(", ")}`);
+  }
+
+  // List headers
+  if (email.headers?.list_unsubscribe) {
+    lines.push(`List-Unsubscribe: ${email.headers.list_unsubscribe}`);
+  }
+  if (email.headers?.list_id) {
+    lines.push(`List-Id: ${email.headers.list_id}`);
+  }
+  if (email.headers?.precedence) {
+    lines.push(`Precedence: ${email.headers.precedence}`);
+  }
+  if (email.headers?.auto_submitted) {
+    lines.push(`Auto-Submitted: ${email.headers.auto_submitted}`);
+  }
+
+  // Attachments
+  if (email.attachments && email.attachments.length > 0) {
+    const attList = email.attachments
+      .map((a) => `${a.name} (${a.type}, ${a.size} bytes)`)
+      .join("; ");
+    lines.push(`X-Attachments: ${attList}`);
+  }
+
+  // Cache info
+  if (email.cache_path) {
+    lines.push(`X-Cache-Path: ${email.cache_path}`);
+  }
+  if (email.body_truncated) {
+    lines.push(`X-Body-Truncated: true (source: ${email.body_source})`);
+  }
+
+  // Blank line then body
+  lines.push("");
+  lines.push(email.body);
+
+  return lines.join("\n");
+};
+
+// Format error response as plain text
+export const formatErrorText = (
+  error: string,
+  suggestion?: string,
+  retryable?: boolean,
+): string => {
+  let text = `Error: ${error}`;
+  if (suggestion) text += `\nSuggestion: ${suggestion}`;
+  if (retryable) text += `\n(retryable)`;
+  return text;
+};
+
+// Format simple success response as plain text
+export const formatSuccessText = (message: string): string => {
+  return message;
+};
+
+// Legacy JSON format (kept for complex responses if needed)
 export const toJSON = (data: unknown): string => {
-  const clean = stripEmpty(data);
-  if (!clean) return "{}";
-
-  // For responses with arrays, format each item on its own line
-  if (
-    typeof clean === "object" && clean !== null && "data" in clean &&
-    typeof (clean as Record<string, unknown>).data === "object"
-  ) {
-    const response = clean as { success?: boolean; data?: unknown; error?: string };
-    const dataObj = response.data as Record<string, unknown>;
-
-    // Find arrays in data and format them line-by-line
-    for (const [key, value] of Object.entries(dataObj)) {
-      if (Array.isArray(value) && value.length > 0) {
-        const lines = value.map((item) => JSON.stringify(item));
-
-        // Build metadata (other fields like total, has_more)
-        const meta: Record<string, unknown> = {};
-        for (const [k, v] of Object.entries(dataObj)) {
-          if (k !== key) meta[k] = v;
-        }
-        const metaStr = Object.keys(meta).length > 0
-          ? "," + JSON.stringify(meta).slice(1, -1)
-          : "";
-
-        const prefix = response.success !== undefined
-          ? `{"success":${response.success},"data":{"${key}":[`
-          : `{"data":{"${key}":[`;
-        const suffix = `]${metaStr}}}`;
-        return prefix + "\n" + lines.join(",\n") + "\n" + suffix;
-      }
-    }
-  }
-
-  return JSON.stringify(clean);
+  return JSON.stringify(data);
 };
 
-export const mcpResponse = (data: unknown) => ({
-  content: [{ type: "text" as const, text: toJSON(data) }],
+export const mcpResponse = (text: string) => ({
+  content: [{ type: "text" as const, text }],
 });
+
