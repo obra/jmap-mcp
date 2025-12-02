@@ -1,66 +1,43 @@
 # JMAP MCP Server
 
-A Model Context Protocol (MCP) server that helps AI agents manage email through
-JMAP (JSON Meta Application Protocol) servers. Built with Node.js.
+An agent-first Model Context Protocol (MCP) server for managing email through JMAP-compliant servers like FastMail, Cyrus IMAP, and Stalwart.
+
+**Unlike other email integrations, this MCP is designed for how AI agents actually work with email** - not just a thin wrapper around raw JMAP APIs.
+
+## What Makes This Different
+
+Most email MCPs expose raw protocols, forcing agents to make multiple calls to do simple things. This MCP follows different principles:
+
+- **One call gets you useful data** - `search` returns summaries with previews, not just IDs that need another fetch
+- **Bodies are always included** - `show` returns actual email content, not blob references to chase down
+- **Flexible inputs everywhere** - Pass mailbox names ("Inbox"), roles ("archive"), or IDs - they all work
+- **Smart caching** - Large bodies and attachments cached to disk automatically, token-efficient responses
+- **Helpful errors** - Error messages include specific suggestions for recovery
+- **Boolean search** - Combine flags with AND/OR/NOT logic, not just single-keyword filters
+
+**Read the design philosophy:** [MCPs are not like other APIs](https://blog.fsck.com/2025/10/19/mcps-are-not-like-other-apis/)
 
 ## Origin
 
-This project originated from [@wyattjoh/jmap-mcp](https://github.com/wyattjoh/jmap-mcp)
-but has evolved into a different product with a distinct design philosophy. The
-original exposed raw JMAP APIs; this version is redesigned from the ground up for
-agent workflows. See the [design philosophy](#design-philosophy) section below.
+This project originated from [@wyattjoh/jmap-mcp](https://github.com/wyattjoh/jmap-mcp) but evolved into a different product. The original exposed raw JMAP APIs; this version is redesigned from the ground up for agent workflows.
 
-## Design Philosophy
-
-This MCP is designed to help agents **work with email**, not just expose raw
-JMAP. Key principles:
-
-- **One call, useful data** - `search` returns summaries, not just IDs
-- **Bodies always included** - `show` returns actual content, not blob
-  references
-- **Flexible inputs** - Mailbox names ("Inbox"), roles ("archive"), or IDs all
-  work
-- **Helpful errors** - Error messages include recovery suggestions
-- **Token efficient** - Bodies >25KB truncated inline, cached in full to disk
-
-## Features
-
-### Tools
-
-| Tool         | Purpose                                                              |
-| ------------ | -------------------------------------------------------------------- |
-| `search`     | Find emails with flexible filters. Returns summaries with body preview |
-| `show`       | Get full email with body. Large bodies cached to `~/.cache/jmap-mcp/` |
-| `mailboxes`  | List folders with roles (inbox, archive, sent, trash) and counts     |
-| `identities` | List available sending identities (from addresses)                   |
-| `update`     | Bulk operations: add/remove flags, move, archive, trash, delete      |
-| `send`       | Compose and send. Supports reply and forward                         |
-
-### Key Capabilities
-
-- Accepts mailbox names ("Inbox"), roles ("archive"), or IDs interchangeably
-- Flexible date parsing: "yesterday", "2024-01-15", or full ISO 8601
-- Human-friendly flags: `read`, `flagged`, `replied` (no $ prefix needed)
-- Full JMAP RFC 8620/8621 compliance via jmap-jam
-- Works with FastMail, Cyrus IMAP, Stalwart Mail Server, Apache James
-
-## Installation
+## Quick Start
 
 ### Prerequisites
 
-- [Node.js](https://nodejs.org/) v18 or later
-- A JMAP-compliant email server
-- Valid JMAP authentication credentials
+- Node.js v18 or later
+- A JMAP-compliant email server (FastMail, Cyrus IMAP, Stalwart, etc.)
+- Bearer token for authentication
 
-### Setup
-
-1. Install the package:
+### Installation
 
 ```bash
 npm install jmap-mcp
 ```
 
-2. Add to your Claude Code MCP settings:
+### Configuration
+
+Add to your MCP client settings (e.g., Claude Code):
 
 ```json
 {
@@ -71,141 +48,309 @@ npm install jmap-mcp
       "args": ["-y", "jmap-mcp"],
       "env": {
         "JMAP_SESSION_URL": "https://api.fastmail.com/jmap/session",
-        "JMAP_BEARER_TOKEN": "YOUR_API_TOKEN"
+        "JMAP_BEARER_TOKEN": "your-token-here"
       }
     }
   }
 }
 ```
 
-## Usage
+**FastMail users:** Get your API token at Settings → Password & Security → App Passwords
 
-### Environment Variables
+## Tools
 
-| Variable            | Required | Description                              |
-| ------------------- | -------- | ---------------------------------------- |
-| `JMAP_SESSION_URL`  | Yes      | JMAP server session URL                  |
-| `JMAP_BEARER_TOKEN` | Yes      | Bearer token for authentication          |
-| `JMAP_ACCOUNT_ID`   | No       | Account ID (auto-detected if not provided) |
+### `search` - Find emails
 
-### Tools Reference
+Search with flexible filters. Returns CSV with id, thread_id, date, from, subject, flags, mailbox, has_attachment, preview.
 
-#### `search`
+```javascript
+// Simple text search
+search({ text: "invoice" })
 
-Find emails with flexible filters. Returns summaries directly (no second call needed).
+// Complex boolean flags
+search({
+  flags: ["read OR flagged", "!draft"],
+  after: "2024-01-01"
+})
 
-**Parameters:**
+// All emails in a thread
+search({ thread: "thread_abc123" })
+```
 
-- `text` - Free text search across all fields
-- `from` - Search by sender
-- `to` - Search by recipient
-- `subject` - Search within subject
-- `body` - Search within body
-- `mailbox` - Mailbox name ("Inbox"), role ("archive"), or ID
-- `flags` - Boolean filter expressions:
-  - AND: `["read", "flagged"]` (must have both)
-  - OR: `["read OR flagged"]` (at least one)
-  - NOT: `["!draft"]` (must not have)
-  - Combined: `["read OR flagged", "!draft"]` ((read OR flagged) AND NOT draft)
-- `after` / `before` - Dates: "yesterday", "2024-01-15", or ISO 8601
-- `has_attachment` - Filter by attachment presence
-- `thread` - Get all messages in a thread
-- `limit` - Max results (default 20)
-- `offset` - Pagination offset
+**Flag filtering:**
+- `["read", "flagged"]` - must have both (AND)
+- `["read OR flagged"]` - must have at least one (OR)
+- `["!draft"]` - must not be a draft (NOT)
+- `["read OR flagged", "!draft"]` - complex: `(read OR flagged) AND (NOT draft)`
 
-**Returns:** Array of `{id, thread_id, subject, from, to, date, preview, flags, mailbox, has_attachment}`
+**Date filters:**
+- `"yesterday"`, `"today"`
+- `"2024-01-15"` (date only)
+- `"2024-01-15T10:00:00Z"` (full ISO 8601)
 
-#### `show`
+**Mailbox filters:**
+- By name: `"Inbox"`, `"Spam"`
+- By role: `"archive"`, `"sent"`, `"trash"`, `"drafts"`
+- By ID: `"mailbox123"`
 
-Get full email content including body and attachments.
+### `show` - Get full email
 
-**Parameters:**
+Returns full email in RFC 5322 format with headers and body.
 
-- `id` - Email ID
-- `format` - "text" (default) or "html"
+```javascript
+show({ id: "email_id" })
+```
 
-**Returns:** Full email with body and attachments.
-- Bodies >25KB: truncated inline, full version cached to `~/.cache/jmap-mcp/{id}/body.txt`
-- Attachments <100KB: auto-downloaded and cached to `~/.cache/jmap-mcp/{id}/attachments/`
-- HTML emails: converted to markdown for better readability
+**Smart caching:**
+- Bodies >25KB: truncated inline, full version at `~/.cache/jmap-mcp/{id}/body.txt`
+- Attachments <100KB: auto-downloaded to `~/.cache/jmap-mcp/{id}/attachments/`
+- Cache paths included in response
 
-#### `mailboxes`
+**HTML emails:** Automatically converted to markdown for better readability and safety.
 
-List mailboxes/folders.
+**Headers included:** List-Unsubscribe, List-Id, Precedence, Auto-Submitted (for detecting newsletters/automation)
 
-**Parameters:**
+### `send` - Compose and send
 
-- `parent` - Optional parent mailbox filter
+```javascript
+// New email
+send({
+  to: ["recipient@example.com"],
+  subject: "Hello",
+  body: "Message here",
+  identity: "you@example.com"
+})
 
-**Returns:** Array of `{id, name, role, parent_id, unread, total}`
+// Reply (auto-generates "Re: subject" and threading headers)
+send({
+  in_reply_to: "email_id",
+  body: "Thanks for your message!",
+  identity: "you@example.com"
+})
 
-#### `identities`
+// Forward (auto-generates "Fwd: subject" and includes original)
+send({
+  forward_of: "email_id",
+  to: ["forward-to@example.com"],
+  body: "FYI",
+  identity: "you@example.com"
+})
 
-List available sending identities.
+// Save as draft without sending
+send({
+  to: ["recipient@example.com"],
+  subject: "Draft",
+  body: "Work in progress",
+  identity: "you@example.com",
+  draft: true
+})
+```
 
-**Returns:** Array of `{id, name, email, reply_to, is_default}`
+**Note:** Subject is optional for replies/forwards (auto-generated from original).
 
-#### `update`
+### `update` - Bulk operations
 
-Bulk update emails.
+```javascript
+// Mark as read
+update({
+  ids: ["email1", "email2"],
+  add_flags: ["read"]
+})
 
-**Parameters:**
+// Archive multiple emails
+update({
+  ids: ["email1", "email2", "email3"],
+  archive: true
+})
 
-- `ids` - Array of email IDs (max 100)
-- `add_flags` - Flags to add: `["read", "flagged"]`
-- `remove_flags` - Flags to remove
-- `move_to` - Mailbox name, role, or ID
-- `archive` - Shortcut to move to Archive
-- `trash` - Shortcut to move to Trash
-- `delete` - Permanently delete (cannot be undone)
+// Move to folder and mark as read
+update({
+  ids: ["email1"],
+  move_to: "Projects",
+  add_flags: ["read"]
+})
 
-#### `send`
+// Trash emails
+update({
+  ids: ["spam1", "spam2"],
+  trash: true
+})
 
-Compose and send email.
+// Permanent delete (cannot be undone!)
+update({
+  ids: ["old_email"],
+  delete: true
+})
+```
 
-**Parameters:**
+### `mailboxes` - List folders
 
-- `to` - Recipients: `["email@example.com"]` or `["Name <email@example.com>"]`
-- `subject` - Email subject
-- `body` - Plain text body
-- `cc` / `bcc` - Optional recipients
-- `in_reply_to` - Email ID to reply to (handles threading automatically)
-- `forward_of` - Email ID to forward (includes original)
-- `identity` - Which "from" address to use
-- `draft` - Set to true to save as draft without sending
+Returns CSV with id, name, role, parent_id, unread, total.
+
+```javascript
+mailboxes()  // All folders
+
+mailboxes({ parent: "Archive" })  // Subfolders only
+```
+
+### `identities` - List sending addresses
+
+Returns CSV with id, name, email, reply_to, is_default.
+
+```javascript
+identities()
+```
+
+Use the email address from results when calling `send`.
+
+## Output Formats
+
+**Lists (search, mailboxes, identities):** CSV format for token efficiency
+```csv
+id,subject,from,date
+abc123,Meeting notes,john@example.com,2024-01-15T10:00:00Z
+def456,Invoice,billing@company.com,2024-01-14T15:30:00Z
+# total=245 has_more=true
+```
+
+**Single emails (show):** RFC 5322 format (standard email headers)
+```
+Message-ID: <msg123@mail.example.com>
+Date: 2024-01-15T10:00:00Z
+From: John Doe <john@example.com>
+To: you@example.com
+Subject: Meeting notes
+X-Flags: read, flagged
+
+Email body content here...
+```
+
+**Actions (send, update):** Plain text
+```
+Sent: email_id
+Updated 5 emails
+```
+
+## Security
+
+### Prompt Injection Prevention
+
+- **HTML sanitization:** Strips `<script>`, `<iframe>`, `<object>`, `<embed>` tags
+- **Link sanitization:** Removes `javascript:` and `data:` URLs
+- **Header sanitization:** Collapses newlines to prevent header injection
+- **Filename sanitization:** Removes path traversal characters from attachment names
+
+### Authentication
+
+Uses bearer tokens for JMAP authentication. Never stores credentials - tokens come from environment variables.
 
 ## JMAP Server Compatibility
 
-Works with any JMAP-compliant server:
+Tested with:
+- ✅ [FastMail](https://www.fastmail.com/)
+- 🟡 [Cyrus IMAP](https://www.cyrusimap.org/) 3.0+ (should work, not tested)
+- 🟡 [Stalwart Mail Server](https://stalw.art/) (should work, not tested)
+- 🟡 [Apache James](https://james.apache.org/) (should work, not tested)
 
-- [FastMail](https://www.fastmail.com/) (commercial)
-- [Cyrus IMAP](https://www.cyrusimap.org/) 3.0+
-- [Stalwart Mail Server](https://stalw.art/)
-- [Apache James](https://james.apache.org/)
+**Compatibility notes:**
+- Uses standard JMAP RFC 8620 (core) and RFC 8621 (mail)
+- Some JMAP extensions (like `onSuccessUpdateEmail`) not used for broader compatibility
+- Works with servers that support basic JMAP mail capabilities
 
 ## Development
 
+### Setup
+
 ```bash
-# Install dependencies
+git clone https://github.com/fsck/jmap-mcp.git
+cd jmap-mcp
 npm install
-
-# Build
-npm run build
-
-# Run tests
-npm test
-
-# Run in development
-npm start
 ```
+
+### Commands
+
+```bash
+npm run build       # Compile TypeScript to dist/
+npm test            # Run test suite (25 tests)
+npm start           # Run the MCP server
+npm run lint        # Type check without emit
+```
+
+### Environment Variables
+
+```bash
+export JMAP_SESSION_URL="https://api.fastmail.com/jmap/session"
+export JMAP_BEARER_TOKEN="your-bearer-token"
+export JMAP_ACCOUNT_ID="optional-account-id"  # Auto-detected if omitted
+```
+
+### Architecture
+
+- **`src/mod.ts`** - MCP server setup, JMAP client initialization, tool registration
+- **`src/tools/index.ts`** - All 6 tool implementations (search, show, send, update, mailboxes, identities)
+- **`src/utils.ts`** - Shared utilities (mailbox resolution, flag parsing, formatters, caching)
+- **`src/utils.test.ts`** - 25 torture tests for CSV and RFC 5322 escaping
+
+### Key Design Patterns
+
+**Liberal inputs, strict outputs (Postel's Law):**
+- Accept mailbox names, roles, OR IDs
+- Accept "yesterday", "2024-01-15", OR ISO 8601 dates
+- Accept "read", "flagged", etc. (no $ prefix needed)
+- Return consistent, well-formatted output
+
+**Progressive disclosure:**
+- Don't make agents chase references (blobIds, partIds)
+- Include related data in one call (mailbox names with search results)
+- Cache large data to disk, return paths
+
+**Token efficiency:**
+- CSV for lists (5-10x smaller than JSON)
+- RFC 5322 for emails (I already know this format)
+- Truncate large bodies, cache full version
+- Only download small attachments
+
+## Troubleshooting
+
+### "JMAP connection failed"
+
+Check your environment variables:
+```bash
+echo $JMAP_SESSION_URL
+echo $JMAP_BEARER_TOKEN
+```
+
+Verify the session URL is correct for your server. FastMail uses `https://api.fastmail.com/jmap/session`.
+
+### "Email submission disabled"
+
+Your account is read-only or doesn't have the `urn:ietf:params:jmap:submission` capability. Check with your email provider.
+
+### "Mailbox not found"
+
+List available mailboxes with the `mailboxes` tool. Mailbox names are case-sensitive.
+
+### Sent emails appear as drafts
+
+This was a compatibility issue with Fastmail, fixed in v0.2.0+. Make sure you're running the latest version.
+
+## Contributing
+
+This is a personal project that evolved from upstream [@wyattjoh/jmap-mcp](https://github.com/wyattjoh/jmap-mcp).
+
+If you find bugs or have suggestions:
+1. Check if the issue exists in the latest version
+2. Include your JMAP server type and version
+3. Provide error messages and reproduction steps
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) file for details.
+MIT License - see [LICENSE](LICENSE) file
 
-## Related Projects
+## Related Resources
 
+- [JMAP RFC 8620](https://datatracker.ietf.org/doc/html/rfc8620) - JMAP Core
+- [JMAP RFC 8621](https://datatracker.ietf.org/doc/html/rfc8621) - JMAP for Mail
 - [jmap-jam](https://github.com/htunnicliff/jmap-jam) - JMAP client library
 - [Model Context Protocol](https://modelcontextprotocol.io/) - MCP specification
-- [JMAP RFC 8620](https://datatracker.ietf.org/doc/html/rfc8620) - JMAP core
-- [JMAP RFC 8621](https://datatracker.ietf.org/doc/html/rfc8621) - JMAP for Mail
+- [Design philosophy blog post](https://blog.fsck.com/2025/10/19/mcps-are-not-like-other-apis/)
