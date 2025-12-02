@@ -39,7 +39,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/fsck/jmap-mcp.git"
+    "url": "https://github.com/obra/jmap-mcp.git"
   },
   "keywords": [
     "mcp",

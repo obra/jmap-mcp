@@ -262,7 +262,7 @@ Tested with:
 ### Setup
 
 ```bash
-git clone https://github.com/fsck/jmap-mcp.git
+git clone https://github.com/obra/jmap-mcp.git
 cd jmap-mcp
 npm install
 ```
