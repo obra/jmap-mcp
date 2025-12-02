@@ -908,15 +908,20 @@ Bodies >25KB truncated inline but full version cached to ~/.cache/jmap-mcp/`,
 
             // Manually move email to Sent and remove draft keyword after successful submission
             // (Fastmail doesn't support onSuccessUpdateEmail)
-            await jam.api.Email.set({
-              accountId,
-              update: {
-                [emailId]: {
-                  mailboxIds: { [sentMailbox.id]: true },
-                  keywords: { "$draft": null },
+            try {
+              await jam.api.Email.set({
+                accountId,
+                update: {
+                  [emailId]: {
+                    mailboxIds: { [sentMailbox.id]: true },
+                    "keywords/$draft": null,
+                  },
                 },
-              },
-            }, JMAP_OPTIONS);
+              }, JMAP_OPTIONS);
+            } catch (error) {
+              // Log error but don't fail the send (email was already sent)
+              console.warn("Failed to move email to Sent:", formatError(error));
+            }
 
             return mcpResponse(`Sent: ${emailId}`);
           } catch (error) {
