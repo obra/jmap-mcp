@@ -19,7 +19,18 @@ Most email MCPs expose raw protocols, forcing agents to make multiple calls to d
 
 ## Origin
 
-This project originated from [@wyattjoh/jmap-mcp](https://github.com/wyattjoh/jmap-mcp) but evolved into a different product. The original exposed raw JMAP APIs; this version is redesigned from the ground up for agent workflows.
+This project was forked from [@wyattjoh/jmap-mcp](https://github.com/wyattjoh/jmap-mcp) but is essentially a complete rewrite (~95% new code). The original exposed raw JMAP APIs; this version takes a fundamentally different approach designed for agent workflows rather than API exposure.
+
+**What's different:**
+- Original: 9 tools exposing raw JMAP methods (Email/get, Email/query, etc.)
+- This version: 6 agent-focused tools (search returns summaries, show returns bodies, etc.)
+- Complete redesign of all tool implementations
+- New utilities for flexible parsing, caching, and formatting
+- Different output formats (CSV, RFC 5322 vs JSON)
+- Ported from Deno to Node.js
+- Added boolean flag logic, attachment caching, HTML-to-markdown
+
+The original project structure and JMAP client integration patterns remain, but the implementation is new.
 
 ## Quick Start
 
@@ -336,12 +347,15 @@ This was a compatibility issue with Fastmail, fixed in v0.2.0+. Make sure you're
 
 ## Contributing
 
-This is a personal project that evolved from upstream [@wyattjoh/jmap-mcp](https://github.com/wyattjoh/jmap-mcp).
+This is a personal project forked from [@wyattjoh/jmap-mcp](https://github.com/wyattjoh/jmap-mcp) with substantial modifications.
 
-If you find bugs or have suggestions:
+**Bug reports and suggestions welcome:**
 1. Check if the issue exists in the latest version
 2. Include your JMAP server type and version
 3. Provide error messages and reproduction steps
+4. Open an issue at https://github.com/obra/jmap-mcp/issues
+
+**Note:** This fork has diverged significantly from upstream and is not compatible with the original.
 
 ## License
 
