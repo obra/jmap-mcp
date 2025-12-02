@@ -558,6 +558,11 @@ export const toCSV = (
   return result;
 };
 
+// Sanitize header value - collapse newlines/tabs to spaces
+const sanitizeHeader = (val: string): string => {
+  return val.replace(/[\r\n\t]+/g, " ").trim();
+};
+
 // Format email in RFC 5322 style
 export const toRFC5322 = (email: {
   id: string;
@@ -584,42 +589,42 @@ export const toRFC5322 = (email: {
 }): string => {
   const lines: string[] = [];
 
-  // Standard headers
-  if (email.message_id) lines.push(`Message-ID: ${email.message_id}`);
+  // Standard headers (sanitized to prevent newline injection)
+  if (email.message_id) lines.push(`Message-ID: ${sanitizeHeader(email.message_id)}`);
   lines.push(`X-JMAP-Id: ${email.id}`);
   lines.push(`X-Thread-Id: ${email.thread_id}`);
   lines.push(`Date: ${email.date}`);
-  lines.push(`From: ${email.from}`);
-  if (email.to.length > 0) lines.push(`To: ${email.to.join(", ")}`);
-  if (email.cc && email.cc.length > 0) lines.push(`Cc: ${email.cc.join(", ")}`);
+  lines.push(`From: ${sanitizeHeader(email.from)}`);
+  if (email.to.length > 0) lines.push(`To: ${email.to.map(sanitizeHeader).join(", ")}`);
+  if (email.cc && email.cc.length > 0) lines.push(`Cc: ${email.cc.map(sanitizeHeader).join(", ")}`);
   if (email.reply_to && email.reply_to.length > 0) {
-    lines.push(`Reply-To: ${email.reply_to.join(", ")}`);
+    lines.push(`Reply-To: ${email.reply_to.map(sanitizeHeader).join(", ")}`);
   }
-  lines.push(`Subject: ${email.subject}`);
+  lines.push(`Subject: ${sanitizeHeader(email.subject)}`);
 
   // Flags as custom header
   if (email.flags.length > 0) {
     lines.push(`X-Flags: ${email.flags.join(", ")}`);
   }
 
-  // List headers
+  // List headers (sanitized)
   if (email.headers?.list_unsubscribe) {
-    lines.push(`List-Unsubscribe: ${email.headers.list_unsubscribe}`);
+    lines.push(`List-Unsubscribe: ${sanitizeHeader(email.headers.list_unsubscribe)}`);
   }
   if (email.headers?.list_id) {
-    lines.push(`List-Id: ${email.headers.list_id}`);
+    lines.push(`List-Id: ${sanitizeHeader(email.headers.list_id)}`);
   }
   if (email.headers?.precedence) {
-    lines.push(`Precedence: ${email.headers.precedence}`);
+    lines.push(`Precedence: ${sanitizeHeader(email.headers.precedence)}`);
   }
   if (email.headers?.auto_submitted) {
-    lines.push(`Auto-Submitted: ${email.headers.auto_submitted}`);
+    lines.push(`Auto-Submitted: ${sanitizeHeader(email.headers.auto_submitted)}`);
   }
 
-  // Attachments
+  // Attachments (sanitized names)
   if (email.attachments && email.attachments.length > 0) {
     const attList = email.attachments
-      .map((a) => `${a.name} (${a.type}, ${a.size} bytes)`)
+      .map((a) => `${sanitizeHeader(a.name)} (${a.type}, ${a.size} bytes)`)
       .join("; ");
     lines.push(`X-Attachments: ${attList}`);
   }
