@@ -102,7 +102,11 @@ Find emails with flexible filters. Returns summaries directly (no second call ne
 - `subject` - Search within subject
 - `body` - Search within body
 - `mailbox` - Mailbox name ("Inbox"), role ("archive"), or ID
-- `flags` - Filter: `["read"]`, `["!read", "flagged"]`. Use `!` to negate.
+- `flags` - Boolean filter expressions:
+  - AND: `["read", "flagged"]` (must have both)
+  - OR: `["read OR flagged"]` (at least one)
+  - NOT: `["!draft"]` (must not have)
+  - Combined: `["read OR flagged", "!draft"]` ((read OR flagged) AND NOT draft)
 - `after` / `before` - Dates: "yesterday", "2024-01-15", or ISO 8601
 - `has_attachment` - Filter by attachment presence
 - `thread` - Get all messages in a thread
@@ -113,14 +117,17 @@ Find emails with flexible filters. Returns summaries directly (no second call ne
 
 #### `show`
 
-Get full email content including body.
+Get full email content including body and attachments.
 
 **Parameters:**
 
 - `id` - Email ID
 - `format` - "text" (default) or "html"
 
-**Returns:** Full email with body. Bodies >25KB are truncated inline but cached in full to `~/.cache/jmap-mcp/{id}/body.txt`
+**Returns:** Full email with body and attachments.
+- Bodies >25KB: truncated inline, full version cached to `~/.cache/jmap-mcp/{id}/body.txt`
+- Attachments <100KB: auto-downloaded and cached to `~/.cache/jmap-mcp/{id}/attachments/`
+- HTML emails: converted to markdown for better readability
 
 #### `mailboxes`
 

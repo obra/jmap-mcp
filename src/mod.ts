@@ -62,13 +62,18 @@ const createServer = async () => {
 - \`search\` - Find emails with flexible filters. Returns summaries (id, subject, from, date, preview, flags).
   - Accepts mailbox names ("Inbox"), roles ("archive"), or IDs
   - Flexible dates: "yesterday", "2024-01-15", or full ISO 8601
-  - Flag filters: ["read"], ["!read", "flagged"] - supports any JMAP keyword
+  - Flag filters with boolean logic:
+    - AND: ["read", "flagged"] (must have both)
+    - OR: ["read OR flagged"] (at least one)
+    - NOT: ["!draft"] (must not have)
+    - Combined: ["read OR flagged", "!draft"]
   - thread: Get all emails in a thread by thread_id
 
-- \`show\` - Get full email with body and headers.
-  - Bodies >25KB truncated inline, full version cached to ~/.cache/jmap-mcp/
+- \`show\` - Get full email with body, headers, and attachments.
+  - Bodies >25KB: truncated inline, full cached to ~/.cache/jmap-mcp/
+  - Attachments <100KB: auto-downloaded and cached
+  - HTML emails: converted to markdown
   - Returns headers: list_unsubscribe, list_id, precedence, auto_submitted
-  - Includes message_id and reply_to for threading/unsubscribe
 
 - \`mailboxes\` - List folders with roles (inbox, archive, sent, trash) and message counts
 
