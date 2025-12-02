@@ -394,10 +394,7 @@ Bodies >25KB truncated inline but full version cached to ~/.cache/jmap-mcp/`,
             "bodyValues",
             "attachments",
             "hasAttachment",
-            "header:List-Unsubscribe:asText",
-            "header:List-Id:asText",
-            "header:Precedence:asText",
-            "header:Auto-Submitted:asText",
+            "headers",
           ],
           fetchTextBodyValues: true,
           fetchHTMLBodyValues: args.format === "html",
@@ -448,21 +445,32 @@ Bodies >25KB truncated inline but full version cached to ~/.cache/jmap-mcp/`,
           cachePath: info.cachePath,
         }));
 
-        // Extract headers (JMAP returns them as header:Name:asText properties)
+        // Extract headers from the headers property
         const headers: ShowResult["headers"] = {};
         // deno-lint-ignore no-explicit-any
         const emailAny = email as any;
-        if (emailAny["header:List-Unsubscribe:asText"]) {
-          headers.list_unsubscribe = emailAny["header:List-Unsubscribe:asText"];
-        }
-        if (emailAny["header:List-Id:asText"]) {
-          headers.list_id = emailAny["header:List-Id:asText"];
-        }
-        if (emailAny["header:Precedence:asText"]) {
-          headers.precedence = emailAny["header:Precedence:asText"];
-        }
-        if (emailAny["header:Auto-Submitted:asText"]) {
-          headers.auto_submitted = emailAny["header:Auto-Submitted:asText"];
+        if (emailAny.headers) {
+          const rawHeaders = emailAny.headers;
+          // Headers are case-insensitive, so normalize
+          const getHeader = (name: string) => {
+            const normalized = name.toLowerCase();
+            for (const [key, value] of Object.entries(rawHeaders)) {
+              if (key.toLowerCase() === normalized) {
+                return Array.isArray(value) ? value[0] : value;
+              }
+            }
+            return undefined;
+          };
+
+          const listUnsub = getHeader("list-unsubscribe");
+          const listId = getHeader("list-id");
+          const precedence = getHeader("precedence");
+          const autoSubmitted = getHeader("auto-submitted");
+
+          if (listUnsub) headers.list_unsubscribe = String(listUnsub);
+          if (listId) headers.list_id = String(listId);
+          if (precedence) headers.precedence = String(precedence);
+          if (autoSubmitted) headers.auto_submitted = String(autoSubmitted);
         }
 
         const showResult: ShowResult = {
@@ -880,20 +888,13 @@ Bodies >25KB truncated inline but full version cached to ~/.cache/jmap-mcp/`,
               return mcpResponse(formatErrorText("Could not find Sent mailbox"));
             }
 
-            // Submit the email with instructions to move to Sent on success
+            // Submit the email
             const [submissionResult] = await jam.api.EmailSubmission.set({
               accountId,
               create: {
                 submission: {
                   emailId,
                   identityId: resolvedIdentity.id,
-                },
-              },
-              // On successful submission, move to Sent and remove draft keyword
-              onSuccessUpdateEmail: {
-                "#submission": {
-                  mailboxIds: { [sentMailbox.id]: true },
-                  "keywords/$draft": null,
                 },
               },
             }, JMAP_OPTIONS);
@@ -904,6 +905,18 @@ Bodies >25KB truncated inline but full version cached to ~/.cache/jmap-mcp/`,
                 `Email created but submission failed: ${JSON.stringify(submitError)}`,
               ));
             }
+
+            // Manually move email to Sent and remove draft keyword after successful submission
+            // (Fastmail doesn't support onSuccessUpdateEmail)
+            await jam.api.Email.set({
+              accountId,
+              update: {
+                [emailId]: {
+                  mailboxIds: { [sentMailbox.id]: true },
+                  keywords: { "$draft": null },
+                },
+              },
+            }, JMAP_OPTIONS);
 
             return mcpResponse(`Sent: ${emailId}`);
           } catch (error) {
