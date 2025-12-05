@@ -372,7 +372,7 @@ Key features:
 
 Returns: id, thread_id, message_id, subject, from, to, cc, reply_to, date, flags, body, attachments
 Headers: list_unsubscribe, list_id, precedence, auto_submitted (for detecting mailing lists/automated mail)
-Bodies >25KB truncated inline but full version cached to ~/.cache/jmap-mcp/`,
+Bodies >25KB truncated inline but full version cached to ~/.cache/fastmail-aibo/`,
     ShowSchema.shape,
     async (args) => {
       try {

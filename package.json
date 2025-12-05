@@ -1,12 +1,12 @@
 {
-  "name": "jmap-mcp",
-  "version": "0.2.0",
-  "description": "A Model Context Protocol (MCP) server for JMAP email management, redesigned for agent workflows",
+  "name": "fastmail-aibo",
+  "version": "0.3.0",
+  "description": "MCP server for Fastmail - email (JMAP), calendar (CalDAV), and contacts (CardDAV)",
   "license": "MIT",
   "type": "module",
   "main": "./dist/mod.js",
   "bin": {
-    "jmap-mcp": "./dist/mod.js"
+    "fastmail-aibo": "./dist/mod.js"
   },
   "files": [
     "dist",
@@ -14,7 +14,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "esbuild src/mod.ts --bundle --platform=node --format=esm --outdir=dist --external:@modelcontextprotocol/sdk --external:jmap-jam --external:zod",
+    "build": "esbuild src/mod.ts --bundle --platform=node --format=esm --outdir=dist --external:@modelcontextprotocol/sdk --external:jmap-jam --external:zod --external:tsdav",
     "start": "node dist/mod.js",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -23,29 +23,34 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
-    "zod": "^3.22.0",
     "jmap-jam": "^0.13.0",
-    "turndown": "^7.2.0"
+    "tsdav": "^2.1.6",
+    "turndown": "^7.2.0",
+    "zod": "^3.22.0"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
     "@types/turndown": "^5.0.0",
+    "esbuild": "^0.24.0",
     "typescript": "^5.3.0",
-    "vitest": "^1.0.0",
-    "esbuild": "^0.24.0"
+    "vitest": "^1.0.0"
   },
   "engines": {
     "node": ">=18.0.0"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/obra/jmap-mcp.git"
+    "url": "https://github.com/obra/fastmail-aibo.git"
   },
   "keywords": [
     "mcp",
-    "jmap",
-    "email",
     "fastmail",
+    "jmap",
+    "caldav",
+    "carddav",
+    "email",
+    "calendar",
+    "contacts",
     "ai",
     "agent"
   ]

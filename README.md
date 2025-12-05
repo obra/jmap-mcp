@@ -1,12 +1,14 @@
-# JMAP MCP Server
+# Fastmail Aibo
 
-An agent-first Model Context Protocol (MCP) server for managing email through JMAP-compliant servers like FastMail, Cyrus IMAP, and Stalwart.
+An agent-first Model Context Protocol (MCP) server for Fastmail - email (via JMAP), calendar (via CalDAV), and contacts (via CardDAV).
 
-**Unlike other email integrations, this MCP is designed for how AI agents actually work with email** - not just a thin wrapper around raw JMAP APIs.
+**"Aibo" (相棒) means "partner" or "buddy" in Japanese - your AI's faithful companion for managing Fastmail.**
+
+**Unlike other email integrations, this MCP is designed for how AI agents actually work** - not just a thin wrapper around raw APIs.
 
 ## What Makes This Different
 
-Most email MCPs expose raw protocols, forcing agents to make multiple calls to do simple things. This MCP follows different principles:
+Most MCPs expose raw protocols, forcing agents to make multiple calls to do simple things. This MCP follows different principles:
 
 - **One call gets you useful data** - `search` returns summaries with previews, not just IDs that need another fetch
 - **Bodies are always included** - `show` returns actual email content, not blob references to chase down
@@ -26,13 +28,13 @@ Based on [@wyattjoh/jmap-mcp](https://github.com/wyattjoh/jmap-mcp) by Wyatt Joh
 ### Prerequisites
 
 - Node.js v18 or later
-- A JMAP-compliant email server (FastMail, Cyrus IMAP, Stalwart, etc.)
-- Bearer token for authentication
+- A Fastmail account with API access
+- Bearer token for authentication (API token)
 
 ### Installation
 
 ```bash
-npm install jmap-mcp
+npm install fastmail-aibo
 ```
 
 ### Configuration
@@ -42,22 +44,35 @@ Add to your MCP client settings (e.g., Claude Code):
 ```json
 {
   "mcpServers": {
-    "email": {
+    "fastmail": {
       "type": "stdio",
       "command": "npx",
-      "args": ["-y", "jmap-mcp"],
+      "args": ["-y", "fastmail-aibo"],
       "env": {
         "JMAP_SESSION_URL": "https://api.fastmail.com/jmap/session",
-        "JMAP_BEARER_TOKEN": "your-token-here"
+        "JMAP_BEARER_TOKEN": "your-token-here",
+        "FASTMAIL_USERNAME": "you@fastmail.com",
+        "FASTMAIL_PASSWORD": "your-app-password"
       }
     }
   }
 }
 ```
 
-**FastMail users:** Get your API token at Settings → Password & Security → App Passwords
+**Environment Variables:**
 
-## Tools
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `JMAP_SESSION_URL` | Yes | Fastmail JMAP endpoint (`https://api.fastmail.com/jmap/session`) |
+| `JMAP_BEARER_TOKEN` | Yes | API token for email access |
+| `FASTMAIL_USERNAME` | No* | Your Fastmail email address |
+| `FASTMAIL_PASSWORD` | No* | App password for CalDAV/CardDAV |
+
+\* Required for calendar and contacts access. Email-only usage needs just JMAP variables.
+
+**Get your credentials:** Settings → Password & Security → App Passwords
+
+## Email Tools
 
 ### `search` - Find emails
 
@@ -102,8 +117,8 @@ show({ id: "email_id" })
 ```
 
 **Smart caching:**
-- Bodies >25KB: truncated inline, full version at `~/.cache/jmap-mcp/{id}/body.txt`
-- Attachments <100KB: auto-downloaded to `~/.cache/jmap-mcp/{id}/attachments/`
+- Bodies >25KB: truncated inline, full version at `~/.cache/fastmail-aibo/{id}/body.txt`
+- Attachments <100KB: auto-downloaded to `~/.cache/fastmail-aibo/{id}/attachments/`
 - Cache paths included in response
 
 **HTML emails:** Automatically converted to markdown for better readability and safety.
@@ -203,6 +218,63 @@ identities()
 
 Use the email address from results when calling `send`.
 
+## Calendar Tools
+
+Calendar support via CalDAV. Requires `FASTMAIL_USERNAME` and `FASTMAIL_PASSWORD` environment variables.
+
+### `calendars` - List calendars
+
+Returns CSV with url, display_name, ctag, color, description.
+
+```javascript
+calendars()
+```
+
+### `events` - Get calendar events
+
+Returns CSV with uid, url, summary, start, end, location, description, all_day.
+
+```javascript
+// All events
+events()
+
+// Events from a specific calendar
+events({ calendar: "Personal" })
+
+// Events in a date range
+events({
+  after: "2024-12-01",
+  before: "2024-12-31"
+})
+```
+
+## Contacts Tools
+
+Contacts support via CardDAV. Requires `FASTMAIL_USERNAME` and `FASTMAIL_PASSWORD` environment variables.
+
+### `address_books` - List address books
+
+Returns CSV with url, display_name, ctag, description.
+
+```javascript
+address_books()
+```
+
+### `contacts` - Get or search contacts
+
+Returns CSV with uid, url, full_name, emails, phones, organization.
+
+```javascript
+// All contacts
+contacts()
+
+// Contacts from a specific address book
+contacts({ addressBook: "Personal" })
+
+// Search contacts
+contacts({ query: "john" })
+```
+
 ## Output Formats
 
 **Lists (search, mailboxes, identities):** CSV format for token efficiency
@@ -244,26 +316,13 @@ Updated 5 emails
 
 Uses bearer tokens for JMAP authentication. Never stores credentials - tokens come from environment variables.
 
-## JMAP Server Compatibility
-
-Tested with:
-- ✅ [FastMail](https://www.fastmail.com/)
-- 🟡 [Cyrus IMAP](https://www.cyrusimap.org/) 3.0+ (should work, not tested)
-- 🟡 [Stalwart Mail Server](https://stalw.art/) (should work, not tested)
-- 🟡 [Apache James](https://james.apache.org/) (should work, not tested)
-
-**Compatibility notes:**
-- Uses standard JMAP RFC 8620 (core) and RFC 8621 (mail)
-- Some JMAP extensions (like `onSuccessUpdateEmail`) not used for broader compatibility
-- Works with servers that support basic JMAP mail capabilities
-
 ## Development
 
 ### Setup
 
 ```bash
-git clone https://github.com/obra/jmap-mcp.git
-cd jmap-mcp
+git clone https://github.com/obra/fastmail-aibo.git
+cd fastmail-aibo
 npm install
 ```
 
@@ -271,7 +330,7 @@ npm install
 
 ```bash
 npm run build       # Compile TypeScript to dist/
-npm test            # Run test suite (25 tests)
+npm test            # Run test suite
 npm start           # Run the MCP server
 npm run lint        # Type check without emit
 ```
@@ -279,17 +338,26 @@ npm run lint        # Type check without emit
 ### Environment Variables
 
 ```bash
+# Required for email
 export JMAP_SESSION_URL="https://api.fastmail.com/jmap/session"
 export JMAP_BEARER_TOKEN="your-bearer-token"
 export JMAP_ACCOUNT_ID="optional-account-id"  # Auto-detected if omitted
+
+# Required for calendar and contacts (CalDAV/CardDAV)
+export FASTMAIL_USERNAME="you@fastmail.com"
+export FASTMAIL_PASSWORD="your-app-password"
 ```
 
 ### Architecture
 
-- **`src/mod.ts`** - MCP server setup, JMAP client initialization, tool registration
-- **`src/tools/index.ts`** - All 6 tool implementations (search, show, send, update, mailboxes, identities)
+- **`src/mod.ts`** - MCP server setup, JMAP/CalDAV/CardDAV client initialization, tool registration
+- **`src/tools/index.ts`** - Email tool implementations (search, show, send, update, mailboxes, identities)
+- **`src/tools/calendar.ts`** - Calendar tool implementations (calendars, events)
+- **`src/tools/contacts.ts`** - Contacts tool implementations (address_books, contacts)
+- **`src/calendar.ts`** - CalDAV client and iCal parsing
+- **`src/contacts.ts`** - CardDAV client and vCard parsing
 - **`src/utils.ts`** - Shared utilities (mailbox resolution, flag parsing, formatters, caching)
-- **`src/utils.test.ts`** - 25 torture tests for CSV and RFC 5322 escaping
+- **`src/utils.test.ts`** - Tests for CSV and RFC 5322 escaping
 
 ### Key Design Patterns
 
@@ -306,7 +374,7 @@ export JMAP_ACCOUNT_ID="optional-account-id"  # Auto-detected if omitted
 
 **Token efficiency:**
 - CSV for lists (5-10x smaller than JSON)
-- RFC 5322 for emails (I already know this format)
+- RFC 5322 for emails (familiar format)
 - Truncate large bodies, cache full version
 - Only download small attachments
 
@@ -320,11 +388,11 @@ echo $JMAP_SESSION_URL
 echo $JMAP_BEARER_TOKEN
 ```
 
-Verify the session URL is correct for your server. FastMail uses `https://api.fastmail.com/jmap/session`.
+Verify the session URL is correct. Fastmail uses `https://api.fastmail.com/jmap/session`.
 
 ### "Email submission disabled"
 
-Your account is read-only or doesn't have the `urn:ietf:params:jmap:submission` capability. Check with your email provider.
+Your account is read-only or doesn't have the `urn:ietf:params:jmap:submission` capability. Check with Fastmail support.
 
 ### "Mailbox not found"
 
@@ -332,16 +400,15 @@ List available mailboxes with the `mailboxes` tool. Mailbox names are case-sensi
 
 ### Sent emails appear as drafts
 
-This was a compatibility issue with Fastmail, fixed in v0.2.0+. Make sure you're running the latest version.
+This was a compatibility issue fixed in v0.2.0+. Make sure you're running the latest version.
 
 ## Contributing
 
-Bug reports and suggestions welcome! Please open an issue at https://github.com/obra/jmap-mcp/issues
+Bug reports and suggestions welcome! Please open an issue at https://github.com/obra/fastmail-aibo/issues
 
 When reporting issues:
 1. Check if the issue exists in the latest version
-2. Include your JMAP server type and version
-3. Provide error messages and reproduction steps
+2. Provide error messages and reproduction steps
 
 ## License
 
@@ -352,5 +419,6 @@ MIT License - see [LICENSE](LICENSE) file
 - [JMAP RFC 8620](https://datatracker.ietf.org/doc/html/rfc8620) - JMAP Core
 - [JMAP RFC 8621](https://datatracker.ietf.org/doc/html/rfc8621) - JMAP for Mail
 - [jmap-jam](https://github.com/htunnicliff/jmap-jam) - JMAP client library
+- [tsdav](https://github.com/natelindev/tsdav) - CalDAV/CardDAV library
 - [Model Context Protocol](https://modelcontextprotocol.io/) - MCP specification
 - [Design philosophy blog post](https://blog.fsck.com/2025/10/19/mcps-are-not-like-other-apis/)

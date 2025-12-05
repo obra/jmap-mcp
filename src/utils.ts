@@ -546,7 +546,7 @@ const htmlToText = (html: string): string => {
 
 const getCacheDir = (): string => {
   const home = process.env.HOME || process.env.USERPROFILE || "/tmp";
-  return join(home, ".cache", "jmap-mcp");
+  return join(home, ".cache", "fastmail-aibo");
 };
 
 export const getEmailCacheDir = (emailId: string): string => {

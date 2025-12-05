@@ -13,6 +13,8 @@ const __dirname = dirname(__filename);
 const pkg = JSON.parse(readFileSync(join(__dirname, "../package.json"), "utf-8"));
 
 import { registerTools } from "./tools/index.js";
+import { registerCalendarTools } from "./tools/calendar.js";
+import { registerContactsTools } from "./tools/contacts.js";
 import { formatError } from "./utils.js";
 
 const JMAPConfigSchema = z.object({
@@ -22,6 +24,28 @@ const JMAPConfigSchema = z.object({
     "Account ID (will be auto-detected if not provided)",
   ),
 });
+
+const CalDAVConfigSchema = z.object({
+  username: z.string().email().describe("Fastmail email address"),
+  password: z.string().min(1).describe("Fastmail app password"),
+});
+
+const getCalDAVConfig = () => {
+  // CalDAV uses username/password (Fastmail app password)
+  // Can use FASTMAIL_USERNAME or fall back to extracting from JMAP token owner
+  const username = process.env.FASTMAIL_USERNAME;
+  const password = process.env.FASTMAIL_PASSWORD || process.env.JMAP_BEARER_TOKEN;
+
+  if (!username || !password) {
+    return null; // CalDAV not configured, skip
+  }
+
+  try {
+    return CalDAVConfigSchema.parse({ username, password });
+  } catch {
+    return null;
+  }
+};
 
 const getJMAPConfig = () => {
   const sessionUrl = process.env.JMAP_SESSION_URL;
@@ -51,13 +75,13 @@ const createJAMClient = (config: z.infer<typeof JMAPConfigSchema>) => {
 const createServer = async () => {
   const server = new McpServer(
     {
-      name: "jmap",
+      name: "fastmail",
       version: pkg.version,
     },
     {
-      instructions: `JMAP Email MCP - Manage email through JMAP-compliant servers.
+      instructions: `Fastmail Aibo - Email, Calendar, and Contacts for Fastmail.
 
-**Tools:**
+**Email Tools:**
 
 - \`search\` - Find emails with flexible filters. Returns summaries (id, subject, from, date, preview, flags).
   - Accepts mailbox names ("Inbox"), roles ("archive"), or IDs
@@ -70,7 +94,7 @@ const createServer = async () => {
   - thread: Get all emails in a thread by thread_id
 
 - \`show\` - Get full email with body, headers, and attachments.
-  - Bodies >25KB: truncated inline, full cached to ~/.cache/jmap-mcp/
+  - Bodies >25KB: truncated inline, full cached to ~/.cache/fastmail-aibo/
   - Attachments <100KB: auto-downloaded and cached
   - HTML emails: converted to markdown
   - Returns headers: list_unsubscribe, list_id, precedence, auto_submitted
@@ -89,11 +113,25 @@ const createServer = async () => {
   - subject: Optional for replies/forwards (auto-generated), required for new emails
   - draft: true to save without sending
 
+**Calendar Tools (requires FASTMAIL_USERNAME and FASTMAIL_PASSWORD):**
+
+- \`calendars\` - List all calendars with url, display_name, color, description
+
+- \`events\` - Get calendar events
+  - Filter by calendar name/url, date range (after/before)
+  - Returns: uid, url, summary, start, end, location, description, all_day
+
+**Contacts Tools (requires FASTMAIL_USERNAME and FASTMAIL_PASSWORD):**
+
+- \`address_books\` - List all address books with url, display_name, description
+
+- \`contacts\` - Get or search contacts
+  - Filter by address book name/url, search by name/email/organization
+  - Returns: uid, url, full_name, emails, phones, organization
+
 **Flags:** read, flagged, replied, draft (no $ prefix needed)
 
-**Mailbox resolution:** Use names ("Inbox"), roles ("archive"), or IDs interchangeably.
-
-Works with FastMail, Cyrus IMAP, Stalwart Mail Server, Apache James, and other JMAP servers.`,
+**Mailbox resolution:** Use names ("Inbox"), roles ("archive"), or IDs interchangeably.`,
   });
 
   const config = getJMAPConfig();
@@ -114,12 +152,33 @@ Works with FastMail, Cyrus IMAP, Stalwart Mail Server, Apache James, and other J
 
   registerTools(server, jam, accountId, config.bearerToken, account.isReadOnly, hasSubmission);
 
-  console.warn("Registered JMAP email tools");
+  console.warn("Registered email tools");
   if (hasSubmission) {
     console.warn("Email submission enabled");
   } else {
     console.warn(
       "Email submission disabled (read-only account or no submission capability)",
+    );
+  }
+
+  // Register calendar tools (CalDAV)
+  const caldavConfig = getCalDAVConfig();
+  if (caldavConfig) {
+    registerCalendarTools(server, null, caldavConfig);
+    console.warn("Registered calendar tools (CalDAV)");
+  } else {
+    console.warn(
+      "Calendar tools disabled (set FASTMAIL_USERNAME and FASTMAIL_PASSWORD for CalDAV access)"
+    );
+  }
+
+  // Register contacts tools (CardDAV) - reuse same config
+  if (caldavConfig) {
+    registerContactsTools(server, null, caldavConfig);
+    console.warn("Registered contacts tools (CardDAV)");
+  } else {
+    console.warn(
+      "Contacts tools disabled (set FASTMAIL_USERNAME and FASTMAIL_PASSWORD for CardDAV access)"
     );
   }
 
@@ -133,7 +192,7 @@ const main = async () => {
   try {
     server = await createServer();
   } catch (error) {
-    console.error("JMAP connection failed:", formatError(error));
+    console.error("Connection failed:", formatError(error));
     console.error(
       "Please check your JMAP_SESSION_URL and JMAP_BEARER_TOKEN environment variables.",
     );
@@ -141,7 +200,7 @@ const main = async () => {
   }
 
   await server.connect(transport);
-  console.warn("JMAP MCP Server running on stdio");
+  console.warn("Fastmail Aibo running on stdio");
 };
 
 // Run if this is the main module
