@@ -17,6 +17,8 @@ export interface Attendee {
   email: string;
   name?: string;
   status?: string; // ACCEPTED, DECLINED, TENTATIVE, NEEDS-ACTION
+  rsvp?: boolean; // Request RSVP from attendee
+  role?: string; // REQ-PARTICIPANT, OPT-PARTICIPANT, NON-PARTICIPANT, CHAIR
 }
 
 export interface Organizer {
@@ -33,6 +35,12 @@ export interface RecurrenceInfo {
   humanReadable: string;
 }
 
+export interface Reminder {
+  trigger: string; // e.g., "-PT15M" (15 min before), "-P1D" (1 day before)
+  action?: string; // DISPLAY (default), EMAIL, AUDIO
+  description?: string; // For DISPLAY/EMAIL actions
+}
+
 export interface CalendarEvent {
   uid: string;
   url: string;
@@ -46,6 +54,12 @@ export interface CalendarEvent {
   organizer?: Organizer;
   attendees?: Attendee[];
   recurrence?: RecurrenceInfo;
+  // Additional fields
+  categories?: string[]; // Tags/categories
+  priority?: number; // 1-9 (1=highest, 9=lowest)
+  transparency?: string; // OPAQUE (busy) or TRANSPARENT (free)
+  eventUrl?: string; // URL for event (e.g., meeting link)
+  reminders?: Reminder[];
 }
 
 export interface CalendarClientConfig {
@@ -90,7 +104,7 @@ export const formatCalendarAsCSV = (calendars: CalendarInfo[]): string => {
 };
 
 export const formatCalendarEventAsCSV = (events: CalendarEvent[]): string => {
-  const header = "uid,url,summary,start,end,location,description,allDay";
+  const header = "uid,url,summary,start,end,location,description,all_day";
   if (events.length === 0) {
     return `${header}\n# total=0`;
   }
@@ -296,6 +310,20 @@ export interface RecurrenceParams {
   byDay?: string[]; // Days of week: MO, TU, WE, TH, FR, SA, SU
 }
 
+export interface AttendeeInput {
+  email: string;
+  name?: string;
+  rsvp?: boolean; // Request RSVP (default true)
+  role?: "required" | "optional" | "non-participant" | "chair";
+}
+
+export interface ReminderInput {
+  minutes?: number; // Minutes before event (e.g., 15, 30, 60)
+  hours?: number; // Hours before event
+  days?: number; // Days before event
+  action?: "display" | "email"; // Default: display
+}
+
 export interface CreateEventParams {
   summary: string;
   start: Date;
@@ -304,6 +332,16 @@ export interface CreateEventParams {
   location?: string;
   description?: string;
   recurrence?: RecurrenceParams;
+  // Attendees and organizer
+  attendees?: AttendeeInput[];
+  organizer?: { email: string; name?: string };
+  // Additional fields
+  status?: "confirmed" | "tentative" | "cancelled";
+  url?: string; // Meeting link
+  categories?: string[];
+  priority?: number; // 1-9
+  transparency?: "opaque" | "transparent"; // busy or free
+  reminders?: ReminderInput[];
 }
 
 /**
@@ -316,6 +354,35 @@ const generateEventUid = (): string => {
 };
 
 /**
+ * Convert role string to iCalendar ROLE parameter value
+ */
+const roleToICalRole = (role: string): string => {
+  const mapping: Record<string, string> = {
+    required: "REQ-PARTICIPANT",
+    optional: "OPT-PARTICIPANT",
+    "non-participant": "NON-PARTICIPANT",
+    chair: "CHAIR",
+  };
+  return mapping[role] ?? "REQ-PARTICIPANT";
+};
+
+/**
+ * Convert reminder input to iCalendar duration string
+ */
+const reminderToDuration = (reminder: ReminderInput): string => {
+  if (reminder.days) {
+    return `-P${reminder.days}D`;
+  }
+  if (reminder.hours) {
+    return `-PT${reminder.hours}H`;
+  }
+  if (reminder.minutes) {
+    return `-PT${reminder.minutes}M`;
+  }
+  return "-PT15M"; // Default 15 minutes
+};
+
+/**
  * Create an iCal string for a new event using ical.js
  */
 export const createICalString = (params: CreateEventParams): { icalString: string; uid: string } => {
@@ -325,6 +392,8 @@ export const createICalString = (params: CreateEventParams): { icalString: strin
   const vcalendar = new ICAL.Component(["vcalendar", [], []]);
   vcalendar.updatePropertyWithValue("version", "2.0");
   vcalendar.updatePropertyWithValue("prodid", "-//Fastmail Aibo//EN");
+  // Required for iTIP (calendar invitations)
+  vcalendar.updatePropertyWithValue("method", "REQUEST");
 
   // Create VEVENT component
   const vevent = new ICAL.Component("vevent");
@@ -354,6 +423,82 @@ export const createICalString = (params: CreateEventParams): { icalString: strin
   }
   if (params.description) {
     vevent.updatePropertyWithValue("description", params.description);
+  }
+
+  // Status (CONFIRMED, TENTATIVE, CANCELLED)
+  if (params.status) {
+    vevent.updatePropertyWithValue("status", params.status.toUpperCase());
+  }
+
+  // URL (meeting link)
+  if (params.url) {
+    vevent.updatePropertyWithValue("url", params.url);
+  }
+
+  // Categories/tags
+  if (params.categories && params.categories.length > 0) {
+    vevent.updatePropertyWithValue("categories", params.categories.join(","));
+  }
+
+  // Priority (1-9)
+  if (params.priority !== undefined && params.priority >= 1 && params.priority <= 9) {
+    vevent.updatePropertyWithValue("priority", params.priority);
+  }
+
+  // Transparency (OPAQUE = busy, TRANSPARENT = free)
+  if (params.transparency) {
+    vevent.updatePropertyWithValue("transp", params.transparency.toUpperCase());
+  }
+
+  // Organizer
+  if (params.organizer) {
+    const organizerProp = new ICAL.Property("organizer");
+    organizerProp.setValue(`mailto:${params.organizer.email}`);
+    if (params.organizer.name) {
+      organizerProp.setParameter("cn", params.organizer.name);
+    }
+    vevent.addProperty(organizerProp);
+  }
+
+  // Attendees
+  if (params.attendees && params.attendees.length > 0) {
+    for (const attendee of params.attendees) {
+      const attendeeProp = new ICAL.Property("attendee");
+      attendeeProp.setValue(`mailto:${attendee.email}`);
+      if (attendee.name) {
+        attendeeProp.setParameter("cn", attendee.name);
+      }
+      // RSVP defaults to true for meeting invitations
+      attendeeProp.setParameter("rsvp", attendee.rsvp !== false ? "TRUE" : "FALSE");
+      // Participation status starts as NEEDS-ACTION
+      attendeeProp.setParameter("partstat", "NEEDS-ACTION");
+      // Role
+      if (attendee.role) {
+        attendeeProp.setParameter("role", roleToICalRole(attendee.role));
+      }
+      vevent.addProperty(attendeeProp);
+    }
+  }
+
+  // Reminders/Alarms
+  if (params.reminders && params.reminders.length > 0) {
+    for (const reminder of params.reminders) {
+      const valarm = new ICAL.Component("valarm");
+      valarm.updatePropertyWithValue("action", (reminder.action ?? "display").toUpperCase());
+
+      // Create TRIGGER property with duration
+      const triggerProp = new ICAL.Property("trigger");
+      const duration = ICAL.Duration.fromString(reminderToDuration(reminder));
+      triggerProp.setValue(duration);
+      valarm.addProperty(triggerProp);
+
+      // DISPLAY alarms need a DESCRIPTION
+      if (!reminder.action || reminder.action === "display") {
+        valarm.updatePropertyWithValue("description", params.summary);
+      }
+
+      vevent.addSubcomponent(valarm);
+    }
   }
 
   // Recurrence rule
@@ -402,6 +547,16 @@ export interface UpdateEventParams {
   allDay?: boolean;
   location?: string;
   description?: string;
+  // Attendees and organizer
+  attendees?: AttendeeInput[]; // Empty array clears all attendees
+  organizer?: { email: string; name?: string };
+  // Additional fields
+  status?: "confirmed" | "tentative" | "cancelled" | ""; // Empty string clears
+  url?: string; // Empty string clears
+  categories?: string[]; // Empty array clears
+  priority?: number | null; // null clears
+  transparency?: "opaque" | "transparent" | ""; // Empty string clears
+  reminders?: ReminderInput[]; // Empty array clears
 }
 
 /**
@@ -470,6 +625,104 @@ export const updateICalString = (
       vevent.removeProperty("description");
     } else {
       vevent.updatePropertyWithValue("description", updates.description);
+    }
+  }
+
+  // Update status
+  if (updates.status !== undefined) {
+    if (updates.status === "") {
+      vevent.removeProperty("status");
+    } else {
+      vevent.updatePropertyWithValue("status", updates.status.toUpperCase());
+    }
+  }
+
+  // Update URL
+  if (updates.url !== undefined) {
+    if (updates.url === "") {
+      vevent.removeProperty("url");
+    } else {
+      vevent.updatePropertyWithValue("url", updates.url);
+    }
+  }
+
+  // Update categories
+  if (updates.categories !== undefined) {
+    vevent.removeProperty("categories");
+    if (updates.categories.length > 0) {
+      vevent.updatePropertyWithValue("categories", updates.categories.join(","));
+    }
+  }
+
+  // Update priority
+  if (updates.priority !== undefined) {
+    if (updates.priority === null) {
+      vevent.removeProperty("priority");
+    } else if (updates.priority >= 1 && updates.priority <= 9) {
+      vevent.updatePropertyWithValue("priority", updates.priority);
+    }
+  }
+
+  // Update transparency
+  if (updates.transparency !== undefined) {
+    if (updates.transparency === "") {
+      vevent.removeProperty("transp");
+    } else {
+      vevent.updatePropertyWithValue("transp", updates.transparency.toUpperCase());
+    }
+  }
+
+  // Update organizer
+  if (updates.organizer !== undefined) {
+    vevent.removeProperty("organizer");
+    const organizerProp = new ICAL.Property("organizer");
+    organizerProp.setValue(`mailto:${updates.organizer.email}`);
+    if (updates.organizer.name) {
+      organizerProp.setParameter("cn", updates.organizer.name);
+    }
+    vevent.addProperty(organizerProp);
+  }
+
+  // Update attendees
+  if (updates.attendees !== undefined) {
+    // Remove all existing attendees
+    vevent.removeAllProperties("attendee");
+    // Add new attendees
+    for (const attendee of updates.attendees) {
+      const attendeeProp = new ICAL.Property("attendee");
+      attendeeProp.setValue(`mailto:${attendee.email}`);
+      if (attendee.name) {
+        attendeeProp.setParameter("cn", attendee.name);
+      }
+      attendeeProp.setParameter("rsvp", attendee.rsvp !== false ? "TRUE" : "FALSE");
+      attendeeProp.setParameter("partstat", "NEEDS-ACTION");
+      if (attendee.role) {
+        attendeeProp.setParameter("role", roleToICalRole(attendee.role));
+      }
+      vevent.addProperty(attendeeProp);
+    }
+  }
+
+  // Update reminders
+  if (updates.reminders !== undefined) {
+    // Remove all existing alarms
+    const alarms = vevent.getAllSubcomponents("valarm");
+    for (const alarm of alarms) {
+      vevent.removeSubcomponent(alarm);
+    }
+    // Add new reminders
+    const summary = vevent.getFirstPropertyValue("summary") as string ?? "Event";
+    for (const reminder of updates.reminders) {
+      const valarm = new ICAL.Component("valarm");
+      valarm.updatePropertyWithValue("action", (reminder.action ?? "display").toUpperCase());
+      const triggerProp = new ICAL.Property("trigger");
+      const duration = ICAL.Duration.fromString(reminderToDuration(reminder));
+      triggerProp.setValue(duration);
+      valarm.addProperty(triggerProp);
+      if (!reminder.action || reminder.action === "display") {
+        valarm.updatePropertyWithValue("description", summary);
+      }
+      vevent.addSubcomponent(valarm);
     }
   }
 

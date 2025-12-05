@@ -57,6 +57,27 @@ const RecurrenceSchema = z.object({
   ),
 });
 
+const AttendeeSchema = z.object({
+  email: z.string().email().describe("Attendee's email address"),
+  name: z.string().optional().describe("Attendee's display name"),
+  rsvp: z.boolean().optional().describe("Request RSVP from attendee (default true)"),
+  role: z.enum(["required", "optional", "non-participant", "chair"]).optional().describe(
+    "Attendee's role: required (default), optional, non-participant, or chair"
+  ),
+});
+
+const OrganizerSchema = z.object({
+  email: z.string().email().describe("Organizer's email address"),
+  name: z.string().optional().describe("Organizer's display name"),
+});
+
+const ReminderSchema = z.object({
+  minutes: z.number().min(0).optional().describe("Minutes before event (e.g., 15, 30)"),
+  hours: z.number().min(0).optional().describe("Hours before event (e.g., 1, 2)"),
+  days: z.number().min(0).optional().describe("Days before event (e.g., 1)"),
+  action: z.enum(["display", "email"]).optional().describe("Reminder type: display (popup) or email"),
+});
+
 const CreateEventSchema = z.object({
   calendar: z.string().min(1).default("default").describe(
     "Calendar to add event to (URL, display name, or 'default' for primary calendar)"
@@ -82,6 +103,31 @@ const CreateEventSchema = z.object({
   recurrence: RecurrenceSchema.optional().describe(
     'Make this a recurring event. Example: {frequency: "weekly", byDay: ["MO", "WE", "FR"]}'
   ),
+  // New fields for invitations and event properties
+  attendees: z.array(AttendeeSchema).optional().describe(
+    'List of attendees to invite. Fastmail sends email invitations automatically. Example: [{email: "bob@example.com", name: "Bob"}]'
+  ),
+  organizer: OrganizerSchema.optional().describe(
+    "Event organizer (defaults to your account email). Invitations are sent from this address."
+  ),
+  status: z.enum(["confirmed", "tentative", "cancelled"]).optional().describe(
+    "Event status: confirmed (default), tentative, or cancelled"
+  ),
+  url: z.string().url().optional().describe(
+    "URL for the event (e.g., video meeting link like Zoom/Meet URL)"
+  ),
+  categories: z.array(z.string()).optional().describe(
+    'Categories/tags for the event. Example: ["work", "meeting"]'
+  ),
+  priority: z.number().min(1).max(9).optional().describe(
+    "Priority 1-9 (1=highest, 9=lowest). Most calendars show 1-4 as high priority."
+  ),
+  transparency: z.enum(["opaque", "transparent"]).optional().describe(
+    "Show as: opaque (busy, default) or transparent (free/available)"
+  ),
+  reminders: z.array(ReminderSchema).optional().describe(
+    'Reminders before event. Example: [{minutes: 15}, {hours: 1}, {days: 1}]'
+  ),
 });
 
 const UpdateEventSchema = z.object({
@@ -105,6 +151,31 @@ const UpdateEventSchema = z.object({
   ),
   description: z.string().optional().describe(
     "New event description. Use empty string to clear."
+  ),
+  // New fields
+  attendees: z.array(AttendeeSchema).optional().describe(
+    'Update attendee list. Empty array removes all attendees. Example: [{email: "bob@example.com"}]'
+  ),
+  organizer: OrganizerSchema.optional().describe(
+    "Update event organizer"
+  ),
+  status: z.enum(["confirmed", "tentative", "cancelled"]).or(z.literal("")).optional().describe(
+    "Event status. Empty string clears status."
+  ),
+  eventUrl: z.string().optional().describe(
+    "URL for event (meeting link). Use empty string to clear."
+  ),
+  categories: z.array(z.string()).optional().describe(
+    "Categories/tags. Empty array clears categories."
+  ),
+  priority: z.number().min(1).max(9).nullable().optional().describe(
+    "Priority 1-9. Use null to clear."
+  ),
+  transparency: z.enum(["opaque", "transparent"]).or(z.literal("")).optional().describe(
+    "Show as busy/free. Empty string clears."
+  ),
+  reminders: z.array(ReminderSchema).optional().describe(
+    "Update reminders. Empty array removes all reminders."
   ),
 });
 
@@ -331,7 +402,7 @@ Returns the created event's UID and URL on success.`,
           }
         }
 
-        // Create iCal string
+        // Create iCal string with all fields
         const { icalString, uid } = createICalString({
           summary: args.summary,
           start,
@@ -340,6 +411,15 @@ Returns the created event's UID and URL on success.`,
           location: args.location,
           description: args.description,
           recurrence,
+          // New fields
+          attendees: args.attendees,
+          organizer: args.organizer,
+          status: args.status,
+          url: args.url,
+          categories: args.categories,
+          priority: args.priority,
+          transparency: args.transparency,
+          reminders: args.reminders,
         });
 
         // Create the event via CalDAV
@@ -427,7 +507,7 @@ Only provide fields you want to change. Use empty string to clear location/descr
           }
         }
 
-        // Update the iCal string
+        // Update the iCal string with all fields
         const updatedICalString = updateICalString(existingEvent.data, {
           summary: args.summary,
           start,
@@ -435,6 +515,15 @@ Only provide fields you want to change. Use empty string to clear location/descr
           allDay: args.allDay,
           location: args.location,
           description: args.description,
+          // New fields
+          attendees: args.attendees,
+          organizer: args.organizer,
+          status: args.status as any,
+          url: args.eventUrl,
+          categories: args.categories,
+          priority: args.priority,
+          transparency: args.transparency as any,
+          reminders: args.reminders,
         });
 
         // Update the event via CalDAV

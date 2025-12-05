@@ -545,6 +545,455 @@ describe("updateICalString", () => {
   });
 });
 
+describe("createICalString - attendees and organizer", () => {
+  it("creates iCal with attendees", () => {
+    const result = createICalString({
+      summary: "Team Meeting",
+      start: new Date("2024-12-04T10:00:00Z"),
+      attendees: [
+        { email: "bob@example.com", name: "Bob Smith" },
+        { email: "carol@example.com" },
+      ],
+    });
+
+    expect(result.icalString).toContain("ATTENDEE");
+    // Note: long lines get folded in iCal, so check without line breaks
+    const unfolded = result.icalString.replace(/\r\n /g, "");
+    expect(unfolded).toContain("mailto:bob@example.com");
+    expect(unfolded).toContain("CN=Bob Smith");
+    expect(unfolded).toContain("mailto:carol@example.com");
+  });
+
+  it("creates iCal with RSVP request for attendees", () => {
+    const result = createICalString({
+      summary: "Meeting",
+      start: new Date("2024-12-04T10:00:00Z"),
+      attendees: [
+        { email: "bob@example.com", rsvp: true },
+      ],
+    });
+
+    expect(result.icalString).toContain("RSVP=TRUE");
+  });
+
+  it("creates iCal with different attendee roles", () => {
+    const result = createICalString({
+      summary: "Meeting",
+      start: new Date("2024-12-04T10:00:00Z"),
+      attendees: [
+        { email: "alice@example.com", role: "chair" },
+        { email: "bob@example.com", role: "required" },
+        { email: "carol@example.com", role: "optional" },
+        { email: "dave@example.com", role: "non-participant" },
+      ],
+    });
+
+    expect(result.icalString).toContain("ROLE=CHAIR");
+    expect(result.icalString).toContain("ROLE=REQ-PARTICIPANT");
+    expect(result.icalString).toContain("ROLE=OPT-PARTICIPANT");
+    expect(result.icalString).toContain("ROLE=NON-PARTICIPANT");
+  });
+
+  it("creates iCal with organizer", () => {
+    const result = createICalString({
+      summary: "Project Kickoff",
+      start: new Date("2024-12-04T10:00:00Z"),
+      organizer: { email: "alice@example.com", name: "Alice Manager" },
+    });
+
+    expect(result.icalString).toContain("ORGANIZER");
+    expect(result.icalString).toContain("CN=Alice Manager");
+    expect(result.icalString).toContain("mailto:alice@example.com");
+  });
+
+  it("creates iCal with organizer without name", () => {
+    const result = createICalString({
+      summary: "Meeting",
+      start: new Date("2024-12-04T10:00:00Z"),
+      organizer: { email: "alice@example.com" },
+    });
+
+    expect(result.icalString).toContain("ORGANIZER:mailto:alice@example.com");
+  });
+
+  it("includes METHOD:REQUEST when attendees are present", () => {
+    const result = createICalString({
+      summary: "Invite Meeting",
+      start: new Date("2024-12-04T10:00:00Z"),
+      attendees: [{ email: "bob@example.com" }],
+    });
+
+    expect(result.icalString).toContain("METHOD:REQUEST");
+  });
+
+  it("roundtrips attendees through parse", () => {
+    const result = createICalString({
+      summary: "Team Sync",
+      start: new Date("2024-12-04T10:00:00Z"),
+      organizer: { email: "alice@example.com", name: "Alice" },
+      attendees: [
+        { email: "bob@example.com", name: "Bob" },
+        { email: "carol@example.com", name: "Carol" },
+      ],
+    });
+
+    const parsed = parseICalEvent(result.icalString, "/test/event.ics");
+    expect(parsed).toBeDefined();
+    expect(parsed!.organizer?.email).toBe("alice@example.com");
+    expect(parsed!.organizer?.name).toBe("Alice");
+    expect(parsed!.attendees).toHaveLength(2);
+    expect(parsed!.attendees![0].email).toBe("bob@example.com");
+    expect(parsed!.attendees![1].email).toBe("carol@example.com");
+  });
+});
+
+describe("createICalString - status, url, categories, priority, transparency", () => {
+  it("creates iCal with confirmed status", () => {
+    const result = createICalString({
+      summary: "Confirmed Meeting",
+      start: new Date("2024-12-04T10:00:00Z"),
+      status: "confirmed",
+    });
+
+    expect(result.icalString).toContain("STATUS:CONFIRMED");
+  });
+
+  it("creates iCal with tentative status", () => {
+    const result = createICalString({
+      summary: "Maybe Meeting",
+      start: new Date("2024-12-04T10:00:00Z"),
+      status: "tentative",
+    });
+
+    expect(result.icalString).toContain("STATUS:TENTATIVE");
+  });
+
+  it("creates iCal with cancelled status", () => {
+    const result = createICalString({
+      summary: "Cancelled Meeting",
+      start: new Date("2024-12-04T10:00:00Z"),
+      status: "cancelled",
+    });
+
+    expect(result.icalString).toContain("STATUS:CANCELLED");
+  });
+
+  it("creates iCal with URL", () => {
+    const result = createICalString({
+      summary: "Video Call",
+      start: new Date("2024-12-04T10:00:00Z"),
+      url: "https://zoom.us/j/123456789",
+    });
+
+    expect(result.icalString).toContain("URL:https://zoom.us/j/123456789");
+  });
+
+  it("creates iCal with categories", () => {
+    const result = createICalString({
+      summary: "Tagged Event",
+      start: new Date("2024-12-04T10:00:00Z"),
+      categories: ["Work", "Important"],
+    });
+
+    // Note: commas in CATEGORIES are escaped in iCal format
+    expect(result.icalString).toContain("CATEGORIES:Work\\,Important");
+  });
+
+  it("creates iCal with priority", () => {
+    const result = createICalString({
+      summary: "Urgent Meeting",
+      start: new Date("2024-12-04T10:00:00Z"),
+      priority: 1, // Urgent
+    });
+
+    expect(result.icalString).toContain("PRIORITY:1");
+  });
+
+  it("creates iCal with opaque transparency (busy)", () => {
+    const result = createICalString({
+      summary: "Busy Time",
+      start: new Date("2024-12-04T10:00:00Z"),
+      transparency: "opaque",
+    });
+
+    expect(result.icalString).toContain("TRANSP:OPAQUE");
+  });
+
+  it("creates iCal with transparent transparency (free)", () => {
+    const result = createICalString({
+      summary: "Free Time",
+      start: new Date("2024-12-04T10:00:00Z"),
+      transparency: "transparent",
+    });
+
+    expect(result.icalString).toContain("TRANSP:TRANSPARENT");
+  });
+
+  it("roundtrips status through parse", () => {
+    const result = createICalString({
+      summary: "Status Test",
+      start: new Date("2024-12-04T10:00:00Z"),
+      status: "tentative",
+    });
+
+    const parsed = parseICalEvent(result.icalString, "/test/event.ics");
+    expect(parsed).toBeDefined();
+    expect(parsed!.status).toBe("TENTATIVE");
+  });
+});
+
+describe("createICalString - reminders (VALARM)", () => {
+  it("creates iCal with reminder in minutes", () => {
+    const result = createICalString({
+      summary: "Meeting with Reminder",
+      start: new Date("2024-12-04T10:00:00Z"),
+      reminders: [{ minutes: 15 }],
+    });
+
+    expect(result.icalString).toContain("BEGIN:VALARM");
+    expect(result.icalString).toContain("TRIGGER:-PT15M");
+    expect(result.icalString).toContain("ACTION:DISPLAY");
+    expect(result.icalString).toContain("END:VALARM");
+  });
+
+  it("creates iCal with reminder in hours", () => {
+    const result = createICalString({
+      summary: "Meeting",
+      start: new Date("2024-12-04T10:00:00Z"),
+      reminders: [{ hours: 2 }],
+    });
+
+    expect(result.icalString).toContain("TRIGGER:-PT2H");
+  });
+
+  it("creates iCal with reminder in days", () => {
+    const result = createICalString({
+      summary: "Conference",
+      start: new Date("2024-12-04T10:00:00Z"),
+      reminders: [{ days: 1 }],
+    });
+
+    expect(result.icalString).toContain("TRIGGER:-P1D");
+  });
+
+  it("creates iCal with email reminder", () => {
+    const result = createICalString({
+      summary: "Important Meeting",
+      start: new Date("2024-12-04T10:00:00Z"),
+      reminders: [{ minutes: 30, action: "email" }],
+    });
+
+    expect(result.icalString).toContain("ACTION:EMAIL");
+  });
+
+  it("creates iCal with multiple reminders", () => {
+    const result = createICalString({
+      summary: "Multi-Reminder Event",
+      start: new Date("2024-12-04T10:00:00Z"),
+      reminders: [
+        { days: 1 },
+        { hours: 1 },
+        { minutes: 15 },
+      ],
+    });
+
+    // Count VALARM blocks
+    const valarmMatches = result.icalString.match(/BEGIN:VALARM/g);
+    expect(valarmMatches).toHaveLength(3);
+    expect(result.icalString).toContain("TRIGGER:-P1D");
+    expect(result.icalString).toContain("TRIGGER:-PT1H");
+    expect(result.icalString).toContain("TRIGGER:-PT15M");
+  });
+});
+
+describe("updateICalString - new fields", () => {
+  it("updates attendees", () => {
+    const original = createICalString({
+      summary: "Meeting",
+      start: new Date("2024-12-04T10:00:00Z"),
+    });
+
+    const updated = updateICalString(original.icalString, {
+      attendees: [
+        { email: "newperson@example.com", name: "New Person" },
+      ],
+    });
+
+    expect(updated).toContain("ATTENDEE");
+    // Note: long lines get folded in iCal, so check without line breaks
+    const unfolded = updated.replace(/\r\n /g, "");
+    expect(unfolded).toContain("mailto:newperson@example.com");
+  });
+
+  it("updates organizer", () => {
+    const original = createICalString({
+      summary: "Meeting",
+      start: new Date("2024-12-04T10:00:00Z"),
+    });
+
+    const updated = updateICalString(original.icalString, {
+      organizer: { email: "boss@example.com", name: "The Boss" },
+    });
+
+    expect(updated).toContain("ORGANIZER");
+    expect(updated).toContain("CN=The Boss");
+    expect(updated).toContain("mailto:boss@example.com");
+  });
+
+  it("updates status", () => {
+    const original = createICalString({
+      summary: "Meeting",
+      start: new Date("2024-12-04T10:00:00Z"),
+      status: "tentative",
+    });
+
+    const updated = updateICalString(original.icalString, {
+      status: "confirmed",
+    });
+
+    expect(updated).toContain("STATUS:CONFIRMED");
+    expect(updated).not.toContain("STATUS:TENTATIVE");
+  });
+
+  it("clears status with empty string", () => {
+    const original = createICalString({
+      summary: "Meeting",
+      start: new Date("2024-12-04T10:00:00Z"),
+      status: "tentative",
+    });
+
+    const updated = updateICalString(original.icalString, {
+      status: "",
+    });
+
+    expect(updated).not.toContain("STATUS:");
+  });
+
+  it("updates url", () => {
+    const original = createICalString({
+      summary: "Video Call",
+      start: new Date("2024-12-04T10:00:00Z"),
+    });
+
+    const updated = updateICalString(original.icalString, {
+      url: "https://meet.google.com/abc-defg-hij",
+    });
+
+    expect(updated).toContain("URL:https://meet.google.com/abc-defg-hij");
+  });
+
+  it("updates categories", () => {
+    const original = createICalString({
+      summary: "Event",
+      start: new Date("2024-12-04T10:00:00Z"),
+    });
+
+    const updated = updateICalString(original.icalString, {
+      categories: ["Personal", "Family"],
+    });
+
+    // Note: commas in CATEGORIES are escaped in iCal format
+    expect(updated).toContain("CATEGORIES:Personal\\,Family");
+  });
+
+  it("clears categories with empty array", () => {
+    const original = createICalString({
+      summary: "Tagged Event",
+      start: new Date("2024-12-04T10:00:00Z"),
+      categories: ["Work"],
+    });
+
+    const updated = updateICalString(original.icalString, {
+      categories: [],
+    });
+
+    expect(updated).not.toContain("CATEGORIES:");
+  });
+
+  it("updates priority", () => {
+    const original = createICalString({
+      summary: "Meeting",
+      start: new Date("2024-12-04T10:00:00Z"),
+    });
+
+    const updated = updateICalString(original.icalString, {
+      priority: 2, // High
+    });
+
+    expect(updated).toContain("PRIORITY:2");
+  });
+
+  it("clears priority with null", () => {
+    const original = createICalString({
+      summary: "Meeting",
+      start: new Date("2024-12-04T10:00:00Z"),
+      priority: 1,
+    });
+
+    const updated = updateICalString(original.icalString, {
+      priority: null,
+    });
+
+    expect(updated).not.toContain("PRIORITY:");
+  });
+
+  it("updates transparency", () => {
+    const original = createICalString({
+      summary: "Meeting",
+      start: new Date("2024-12-04T10:00:00Z"),
+    });
+
+    const updated = updateICalString(original.icalString, {
+      transparency: "transparent",
+    });
+
+    expect(updated).toContain("TRANSP:TRANSPARENT");
+  });
+
+  it("updates reminders", () => {
+    const original = createICalString({
+      summary: "Meeting",
+      start: new Date("2024-12-04T10:00:00Z"),
+    });
+
+    const updated = updateICalString(original.icalString, {
+      reminders: [{ minutes: 30 }],
+    });
+
+    expect(updated).toContain("BEGIN:VALARM");
+    expect(updated).toContain("TRIGGER:-PT30M");
+    expect(updated).toContain("END:VALARM");
+  });
+
+  it("clears attendees with empty array", () => {
+    const original = createICalString({
+      summary: "Meeting",
+      start: new Date("2024-12-04T10:00:00Z"),
+      attendees: [{ email: "bob@example.com" }],
+    });
+
+    const updated = updateICalString(original.icalString, {
+      attendees: [],
+    });
+
+    expect(updated).not.toContain("ATTENDEE");
+  });
+
+  it("clears reminders with empty array", () => {
+    const original = createICalString({
+      summary: "Meeting",
+      start: new Date("2024-12-04T10:00:00Z"),
+      reminders: [{ minutes: 15 }],
+    });
+
+    const updated = updateICalString(original.icalString, {
+      reminders: [],
+    });
+
+    expect(updated).not.toContain("BEGIN:VALARM");
+  });
+});
+
 describe("createCalendarClient", () => {
   it("creates a client with the correct Fastmail URL format", async () => {
     // This tests that createCalendarClient constructs the right URL

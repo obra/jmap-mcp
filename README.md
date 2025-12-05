@@ -248,6 +248,147 @@ events({
 })
 ```
 
+### `create_event` - Create calendar events
+
+Create events with optional attendees for automatic email invitations.
+
+```javascript
+// Simple event
+create_event({
+  summary: "Team Meeting",
+  start: "2024-12-10T10:00:00Z",
+  end: "2024-12-10T11:00:00Z",
+  calendar: "Work"
+})
+
+// Event with attendees (sends email invitations automatically via iMIP)
+create_event({
+  summary: "Project Kickoff",
+  start: "2024-12-15T14:00:00Z",
+  end: "2024-12-15T15:00:00Z",
+  location: "Conference Room A",
+  description: "Q1 planning session",
+  calendar: "Work",
+  attendees: [
+    { email: "bob@example.com", name: "Bob Smith", role: "required" },
+    { email: "carol@example.com", role: "optional" }
+  ],
+  organizer: { email: "you@fastmail.com", name: "Your Name" }
+})
+
+// All-day event
+create_event({
+  summary: "Company Holiday",
+  start: "2024-12-25",
+  allDay: true
+})
+
+// Recurring event
+create_event({
+  summary: "Daily Standup",
+  start: "2024-12-01T09:00:00Z",
+  end: "2024-12-01T09:15:00Z",
+  recurrence: {
+    frequency: "daily",
+    count: 30
+  }
+})
+
+// Event with reminders
+create_event({
+  summary: "Important Meeting",
+  start: "2024-12-10T10:00:00Z",
+  reminders: [
+    { days: 1 },           // 1 day before
+    { hours: 1 },          // 1 hour before
+    { minutes: 15 }        // 15 minutes before
+  ]
+})
+
+// Event with all options
+create_event({
+  summary: "Quarterly Review",
+  start: "2024-12-20T14:00:00Z",
+  end: "2024-12-20T16:00:00Z",
+  location: "Main Conference Room",
+  description: "Q4 review and Q1 planning",
+  calendar: "Work",
+  status: "confirmed",        // confirmed, tentative, cancelled
+  url: "https://zoom.us/j/123456789",  // Meeting link
+  categories: ["Work", "Important"],
+  priority: 2,                // 1=urgent, 2=high, 3=normal, 4=low
+  transparency: "opaque",     // opaque (busy) or transparent (free)
+  attendees: [
+    { email: "team@example.com", name: "Team", role: "required", rsvp: true }
+  ],
+  organizer: { email: "you@fastmail.com" },
+  reminders: [{ minutes: 30 }]
+})
+```
+
+**Attendee options:**
+- `email` (required): Attendee's email address
+- `name` (optional): Display name
+- `role`: `required` (default), `optional`, `non-participant`, `chair`
+- `rsvp`: Request RSVP from attendee (default: true)
+
+**Reminder options (specify one):**
+- `days`: Days before event (e.g., 1 for day before)
+- `hours`: Hours before event (e.g., 2 for 2 hours before)
+- `minutes`: Minutes before event (e.g., 15)
+- `action`: `display` (popup, default) or `email`
+
+**iMIP invitations:** When you add attendees, Fastmail automatically sends calendar invitations via email. Responses (Accept/Decline/Maybe) are sent back automatically.
+
+### `update_event` - Update existing events
+
+Update any event field. Fields not specified are preserved.
+
+```javascript
+// Reschedule an event
+update_event({
+  calendar: "Work",
+  eventId: "event-uid-123",
+  start: "2024-12-15T15:00:00Z",
+  end: "2024-12-15T16:00:00Z"
+})
+
+// Add attendees to existing event (sends invitations)
+update_event({
+  calendar: "Work",
+  eventId: "event-uid-123",
+  attendees: [
+    { email: "newperson@example.com", name: "New Person" }
+  ]
+})
+
+// Cancel an event (notifies attendees)
+update_event({
+  calendar: "Work",
+  eventId: "event-uid-123",
+  status: "cancelled"
+})
+
+// Clear optional fields
+update_event({
+  calendar: "Work",
+  eventId: "event-uid-123",
+  location: "",          // Clear location
+  categories: [],        // Clear all categories
+  reminders: [],         // Clear all reminders
+  priority: null         // Clear priority
+})
+```
+
+### `delete_event` - Delete calendar events
+
+```javascript
+delete_event({
+  calendar: "Work",
+  eventId: "event-uid-123"
+})
+```
+
 ## Contacts Tools
 
 Contacts support via CardDAV. Requires `FASTMAIL_USERNAME` and `FASTMAIL_PASSWORD` environment variables.
