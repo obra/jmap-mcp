@@ -37,10 +37,10 @@ const EventsSchema = z.object({
 });
 
 const CreateEventSchema = z.object({
-  calendar: z.string().describe(
+  calendar: z.string().min(1).describe(
     "Calendar to add event to (URL or display name). Use 'calendars' tool to list available calendars."
   ),
-  summary: z.string().describe(
+  summary: z.string().min(1).describe(
     "Event title/summary"
   ),
   start: z.string().describe(
@@ -61,7 +61,7 @@ const CreateEventSchema = z.object({
 });
 
 const UpdateEventSchema = z.object({
-  url: z.string().describe(
+  url: z.string().url().describe(
     "The full URL of the event to update (returned by 'events' tool or 'create_event')"
   ),
   summary: z.string().optional().describe(
@@ -85,7 +85,7 @@ const UpdateEventSchema = z.object({
 });
 
 const DeleteEventSchema = z.object({
-  url: z.string().describe(
+  url: z.string().url().describe(
     "The full URL of the event to delete (returned by 'events' tool or 'create_event')"
   ),
 });

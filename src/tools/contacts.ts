@@ -35,20 +35,20 @@ const ContactsSchema = z.object({
 });
 
 const EmailSchema = z.object({
-  type: z.string().optional().describe("Email type: work, home, other"),
-  value: z.string().describe("Email address"),
+  type: z.enum(["work", "home", "other"]).optional().describe("Email type"),
+  value: z.string().email().describe("Email address"),
 });
 
 const PhoneSchema = z.object({
-  type: z.string().optional().describe("Phone type: cell, work, home, fax, other"),
-  value: z.string().describe("Phone number"),
+  type: z.enum(["cell", "work", "home", "fax", "other"]).optional().describe("Phone type"),
+  value: z.string().min(1).describe("Phone number"),
 });
 
 const CreateContactSchema = z.object({
-  addressBook: z.string().describe(
+  addressBook: z.string().min(1).describe(
     "Address book to add contact to (URL or display name). Use 'address_books' tool to list available address books."
   ),
-  fullName: z.string().describe(
+  fullName: z.string().min(1).describe(
     "Contact's full name"
   ),
   emails: z.array(EmailSchema).optional().describe(
@@ -69,7 +69,7 @@ const CreateContactSchema = z.object({
 });
 
 const UpdateContactSchema = z.object({
-  url: z.string().describe(
+  url: z.string().url().describe(
     "The full URL of the contact to update (returned by 'contacts' tool or 'create_contact')"
   ),
   fullName: z.string().optional().describe(
@@ -93,7 +93,7 @@ const UpdateContactSchema = z.object({
 });
 
 const DeleteContactSchema = z.object({
-  url: z.string().describe(
+  url: z.string().url().describe(
     "The full URL of the contact to delete (returned by 'contacts' tool or 'create_contact')"
   ),
 });
