@@ -284,6 +284,84 @@ export const parseICalEvent = (
 };
 
 // =============================================================================
+// iCal Generation (using ical.js)
+// =============================================================================
+
+export interface CreateEventParams {
+  summary: string;
+  start: Date;
+  end?: Date;
+  allDay?: boolean;
+  location?: string;
+  description?: string;
+}
+
+/**
+ * Generate a unique UID for a new calendar event
+ */
+const generateEventUid = (): string => {
+  const timestamp = Date.now();
+  const random = Math.random().toString(36).substring(2, 10);
+  return `${timestamp}-${random}@fastmail-aibo`;
+};
+
+/**
+ * Create an iCal string for a new event using ical.js
+ */
+export const createICalString = (params: CreateEventParams): { icalString: string; uid: string } => {
+  const uid = generateEventUid();
+
+  // Create VCALENDAR component
+  const vcalendar = new ICAL.Component(["vcalendar", [], []]);
+  vcalendar.updatePropertyWithValue("version", "2.0");
+  vcalendar.updatePropertyWithValue("prodid", "-//Fastmail Aibo//EN");
+
+  // Create VEVENT component
+  const vevent = new ICAL.Component("vevent");
+  vevent.updatePropertyWithValue("uid", uid);
+  vevent.updatePropertyWithValue("dtstamp", ICAL.Time.now());
+  vevent.updatePropertyWithValue("summary", params.summary);
+
+  // Set start time
+  const startTime = ICAL.Time.fromJSDate(params.start, false);
+  if (params.allDay) {
+    startTime.isDate = true;
+  }
+  vevent.updatePropertyWithValue("dtstart", startTime);
+
+  // Set end time (if provided)
+  if (params.end) {
+    const endTime = ICAL.Time.fromJSDate(params.end, false);
+    if (params.allDay) {
+      endTime.isDate = true;
+    }
+    vevent.updatePropertyWithValue("dtend", endTime);
+  }
+
+  // Optional fields
+  if (params.location) {
+    vevent.updatePropertyWithValue("location", params.location);
+  }
+  if (params.description) {
+    vevent.updatePropertyWithValue("description", params.description);
+  }
+
+  vcalendar.addSubcomponent(vevent);
+
+  return {
+    icalString: vcalendar.toString(),
+    uid,
+  };
+};
+
+/**
+ * Generate iCal filename from UID
+ */
+export const generateICalFilename = (uid: string): string => {
+  return `${uid}.ics`;
+};
+
+// =============================================================================
 // CalDAV Client
 // =============================================================================
 

@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   createCalendarClient,
+  createICalString,
+  generateICalFilename,
   formatCalendarAsCSV,
   formatCalendarEventAsCSV,
   parseICalEvent,
@@ -319,6 +321,111 @@ END:VCALENDAR`;
     const event = parseICalEvent(ical, "/cal/event.ics");
     expect(event).toBeDefined();
     expect(event!.status).toBe("CANCELLED");
+  });
+});
+
+describe("createICalString", () => {
+  it("creates valid iCal with required fields", () => {
+    const result = createICalString({
+      summary: "Team Meeting",
+      start: new Date("2024-12-04T10:00:00Z"),
+    });
+
+    expect(result.uid).toBeDefined();
+    expect(result.uid).toContain("@fastmail-aibo");
+    expect(result.icalString).toContain("BEGIN:VCALENDAR");
+    expect(result.icalString).toContain("END:VCALENDAR");
+    expect(result.icalString).toContain("BEGIN:VEVENT");
+    expect(result.icalString).toContain("END:VEVENT");
+    expect(result.icalString).toContain("SUMMARY:Team Meeting");
+    expect(result.icalString).toContain(`UID:${result.uid}`);
+  });
+
+  it("creates iCal with end time", () => {
+    const result = createICalString({
+      summary: "Meeting",
+      start: new Date("2024-12-04T10:00:00Z"),
+      end: new Date("2024-12-04T11:00:00Z"),
+    });
+
+    expect(result.icalString).toContain("DTSTART");
+    expect(result.icalString).toContain("DTEND");
+  });
+
+  it("creates all-day event", () => {
+    // Use explicit UTC time to avoid timezone issues
+    const result = createICalString({
+      summary: "Holiday",
+      start: new Date("2024-12-25T00:00:00Z"),
+      allDay: true,
+    });
+
+    // All-day events should use DATE format with VALUE=DATE parameter
+    expect(result.icalString).toContain("DTSTART;VALUE=DATE:");
+    // Should have the date in YYYYMMDD format
+    expect(result.icalString).toMatch(/DTSTART;VALUE=DATE:\d{8}/);
+  });
+
+  it("includes location when provided", () => {
+    const result = createICalString({
+      summary: "Office Meeting",
+      start: new Date("2024-12-04T10:00:00Z"),
+      location: "Conference Room A",
+    });
+
+    expect(result.icalString).toContain("LOCATION:Conference Room A");
+  });
+
+  it("includes description when provided", () => {
+    const result = createICalString({
+      summary: "Planning Session",
+      start: new Date("2024-12-04T10:00:00Z"),
+      description: "Quarterly planning meeting",
+    });
+
+    expect(result.icalString).toContain("DESCRIPTION:Quarterly planning meeting");
+  });
+
+  it("generates unique UIDs for each call", () => {
+    const result1 = createICalString({
+      summary: "Event 1",
+      start: new Date("2024-12-04T10:00:00Z"),
+    });
+    const result2 = createICalString({
+      summary: "Event 2",
+      start: new Date("2024-12-04T11:00:00Z"),
+    });
+
+    expect(result1.uid).not.toBe(result2.uid);
+  });
+
+  it("can be parsed by parseICalEvent", () => {
+    const result = createICalString({
+      summary: "Roundtrip Test",
+      start: new Date("2024-12-04T10:00:00Z"),
+      end: new Date("2024-12-04T11:00:00Z"),
+      location: "Test Location",
+      description: "Test Description",
+    });
+
+    const parsed = parseICalEvent(result.icalString, "/test/event.ics");
+    expect(parsed).toBeDefined();
+    expect(parsed!.uid).toBe(result.uid);
+    expect(parsed!.summary).toBe("Roundtrip Test");
+    expect(parsed!.location).toBe("Test Location");
+    expect(parsed!.description).toBe("Test Description");
+  });
+});
+
+describe("generateICalFilename", () => {
+  it("generates .ics filename from UID", () => {
+    const filename = generateICalFilename("12345-abc@fastmail-aibo");
+    expect(filename).toBe("12345-abc@fastmail-aibo.ics");
+  });
+
+  it("handles UIDs with special characters", () => {
+    const filename = generateICalFilename("event-123@example.com");
+    expect(filename).toBe("event-123@example.com.ics");
   });
 });
 
