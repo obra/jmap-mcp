@@ -23,6 +23,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
+    "ical.js": "^2.2.1",
     "jmap-jam": "^0.13.0",
     "tsdav": "^2.1.6",
     "turndown": "^7.2.0",

@@ -1,4 +1,5 @@
 import { DAVClient, DAVAddressBook, DAVVCard } from "tsdav";
+import ICAL from "ical.js";
 
 // =============================================================================
 // Types
@@ -21,6 +22,20 @@ export interface ContactPhone {
   value: string;
 }
 
+export interface ContactUrl {
+  type?: string;
+  value: string;
+}
+
+export interface ContactAddress {
+  type?: string;
+  street?: string;
+  city?: string;
+  state?: string;
+  postalCode?: string;
+  country?: string;
+}
+
 export interface ContactInfo {
   uid: string;
   url: string;
@@ -28,6 +43,11 @@ export interface ContactInfo {
   emails: ContactEmail[];
   phones: ContactPhone[];
   organization?: string;
+  title?: string;
+  birthday?: string;
+  notes?: string;
+  urls?: ContactUrl[];
+  addresses?: ContactAddress[];
 }
 
 export interface ContactsClientConfig {
@@ -95,12 +115,12 @@ export const formatContactAsCSV = (contacts: ContactInfo[]): string => {
 };
 
 // =============================================================================
-// vCard Parsing
+// vCard Parsing (using ical.js)
 // =============================================================================
 
 /**
- * Parse vCard content and extract contact details
- * Handles common vCard 3.0 and 4.0 formats
+ * Parse vCard content and extract contact details using ical.js
+ * Handles vCard 3.0 and 4.0 formats
  */
 export const parseVCard = (
   vcardContent: string,
@@ -111,67 +131,132 @@ export const parseVCard = (
     return undefined;
   }
 
-  // Helper to unescape vCard values
-  const unescape = (value: string): string => {
-    return value
-      .replace(/\\,/g, ",")
-      .replace(/\\;/g, ";")
-      .replace(/\\n/g, "\n")
-      .replace(/\\\\/g, "\\");
-  };
+  try {
+    const jcalData = ICAL.parse(vcardContent);
+    const vcard = new ICAL.Component(jcalData);
 
-  // Helper to extract a simple property value
-  const extractProperty = (name: string): string | undefined => {
-    const regex = new RegExp(`^${name}(?:;[^:]*)?:(.*)$`, "im");
-    const match = vcardContent.match(regex);
-    if (match) {
-      return unescape(match[1].trim());
-    }
-    return undefined;
-  };
-
-  // Helper to extract typed properties (like EMAIL;TYPE=WORK:value)
-  const extractTypedProperties = (name: string): { type: string; value: string }[] => {
-    const results: { type: string; value: string }[] = [];
-    const regex = new RegExp(`^${name}(?:;([^:]*)?)?:(.*)$`, "gim");
-    let match;
-
-    while ((match = regex.exec(vcardContent)) !== null) {
-      const params = match[1] || "";
-      const value = unescape(match[2].trim());
-
-      // Extract TYPE from parameters (e.g., "TYPE=WORK" or just "WORK")
-      let type = "other";
-      const typeMatch = params.match(/TYPE=([^;,]+)/i) || params.match(/^([A-Za-z]+)$/);
-      if (typeMatch) {
-        type = typeMatch[1].toLowerCase();
-      }
-
-      results.push({ type, value });
+    // Get UID - required
+    const uid = vcard.getFirstPropertyValue("uid");
+    if (!uid) {
+      return undefined;
     }
 
-    return results;
-  };
+    // Get FN (Full Name) - required
+    const fullName = vcard.getFirstPropertyValue("fn");
+    if (!fullName) {
+      return undefined;
+    }
 
-  const uid = extractProperty("UID");
-  const fullName = extractProperty("FN");
-  const organization = extractProperty("ORG");
-  const emails = extractTypedProperties("EMAIL");
-  const phones = extractTypedProperties("TEL");
+    // Build result
+    const result: ContactInfo = {
+      uid: String(uid),
+      url,
+      fullName: String(fullName),
+      emails: [],
+      phones: [],
+    };
 
-  // UID and FN are required
-  if (!uid || !fullName) {
+    // Parse organization
+    const org = vcard.getFirstPropertyValue("org");
+    if (org) {
+      result.organization = String(org);
+    }
+
+    // Parse title
+    const title = vcard.getFirstPropertyValue("title");
+    if (title) {
+      result.title = String(title);
+    }
+
+    // Parse birthday
+    const bday = vcard.getFirstPropertyValue("bday");
+    if (bday) {
+      // ical.js may return various formats, normalize to YYYY-MM-DD
+      result.birthday = String(bday);
+    }
+
+    // Parse notes
+    const note = vcard.getFirstPropertyValue("note");
+    if (note) {
+      result.notes = String(note);
+    }
+
+    // Parse emails with types
+    const emailProps = vcard.getAllProperties("email");
+    result.emails = emailProps.map((prop: any) => {
+      const value = prop.getFirstValue();
+      const type = prop.getParameter("type");
+      return {
+        type: type ? String(type).toLowerCase() : "other",
+        value: String(value),
+      };
+    });
+
+    // Parse phones with types
+    const telProps = vcard.getAllProperties("tel");
+    result.phones = telProps.map((prop: any) => {
+      const value = prop.getFirstValue();
+      const type = prop.getParameter("type");
+      return {
+        type: type ? String(type).toLowerCase() : "other",
+        value: String(value),
+      };
+    });
+
+    // Parse URLs
+    const urlProps = vcard.getAllProperties("url");
+    if (urlProps.length > 0) {
+      result.urls = urlProps.map((prop: any) => {
+        const value = prop.getFirstValue();
+        const type = prop.getParameter("type");
+        return {
+          type: type ? String(type).toLowerCase() : undefined,
+          value: String(value),
+        };
+      });
+    }
+
+    // Parse addresses
+    const adrProps = vcard.getAllProperties("adr");
+    if (adrProps.length > 0) {
+      result.addresses = adrProps.map((prop: any) => {
+        const value = prop.getFirstValue();
+        const type = prop.getParameter("type");
+
+        // ADR structure: [PO Box, Extended, Street, City, State, Postal Code, Country]
+        // value can be an array or structured value
+        let parts: string[] = [];
+        if (Array.isArray(value)) {
+          parts = value.map((v: any) => String(v ?? ""));
+        } else if (typeof value === "object" && value !== null) {
+          // Structured value from ical.js
+          parts = [
+            value.postOfficeBox ?? "",
+            value.extendedAddress ?? "",
+            value.streetAddress ?? "",
+            value.locality ?? "",
+            value.region ?? "",
+            value.postalCode ?? "",
+            value.countryName ?? "",
+          ];
+        }
+
+        return {
+          type: type ? String(type).toLowerCase() : undefined,
+          street: parts[2] || undefined,
+          city: parts[3] || undefined,
+          state: parts[4] || undefined,
+          postalCode: parts[5] || undefined,
+          country: parts[6] || undefined,
+        };
+      });
+    }
+
+    return result;
+  } catch (error) {
+    // If ical.js fails to parse, return undefined
     return undefined;
   }
-
-  return {
-    uid,
-    url,
-    fullName,
-    emails,
-    phones,
-    organization,
-  };
 };
 
 // =============================================================================

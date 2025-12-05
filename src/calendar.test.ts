@@ -204,6 +204,124 @@ END:VCALENDAR`;
 // Integration-style Tests (with mocked tsdav)
 // =============================================================================
 
+describe("parseICalEvent - RRULE recurrence", () => {
+  it("parses a daily recurring event", () => {
+    const ical = `BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+UID:daily-standup@example.com
+DTSTART:20241204T090000Z
+DTEND:20241204T091500Z
+SUMMARY:Daily Standup
+RRULE:FREQ=DAILY;COUNT=10
+END:VEVENT
+END:VCALENDAR`;
+
+    const event = parseICalEvent(ical, "/cal/event.ics");
+    expect(event).toBeDefined();
+    expect(event!.recurrence).toBeDefined();
+    expect(event!.recurrence!.frequency).toBe("DAILY");
+    expect(event!.recurrence!.count).toBe(10);
+    expect(event!.recurrence!.humanReadable).toContain("daily");
+  });
+
+  it("parses a weekly recurring event with specific days", () => {
+    const ical = `BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+UID:weekly-meeting@example.com
+DTSTART:20241204T100000Z
+SUMMARY:Team Sync
+RRULE:FREQ=WEEKLY;BYDAY=MO,WE,FR
+END:VEVENT
+END:VCALENDAR`;
+
+    const event = parseICalEvent(ical, "/cal/event.ics");
+    expect(event).toBeDefined();
+    expect(event!.recurrence).toBeDefined();
+    expect(event!.recurrence!.frequency).toBe("WEEKLY");
+    expect(event!.recurrence!.byDay).toEqual(["MO", "WE", "FR"]);
+  });
+
+  it("parses a monthly recurring event with UNTIL", () => {
+    const ical = `BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+UID:monthly-report@example.com
+DTSTART:20241201T140000Z
+SUMMARY:Monthly Report
+RRULE:FREQ=MONTHLY;UNTIL=20251201T140000Z
+END:VEVENT
+END:VCALENDAR`;
+
+    const event = parseICalEvent(ical, "/cal/event.ics");
+    expect(event).toBeDefined();
+    expect(event!.recurrence).toBeDefined();
+    expect(event!.recurrence!.frequency).toBe("MONTHLY");
+    expect(event!.recurrence!.until).toBeDefined();
+  });
+});
+
+describe("parseICalEvent - attendees and organizer", () => {
+  it("parses organizer from event", () => {
+    const ical = `BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+UID:meeting@example.com
+DTSTART:20241204T100000Z
+SUMMARY:Project Kickoff
+ORGANIZER;CN=Alice Smith:mailto:alice@example.com
+END:VEVENT
+END:VCALENDAR`;
+
+    const event = parseICalEvent(ical, "/cal/event.ics");
+    expect(event).toBeDefined();
+    expect(event!.organizer).toBeDefined();
+    expect(event!.organizer!.email).toBe("alice@example.com");
+    expect(event!.organizer!.name).toBe("Alice Smith");
+  });
+
+  it("parses multiple attendees with status", () => {
+    const ical = `BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+UID:meeting@example.com
+DTSTART:20241204T100000Z
+SUMMARY:Team Meeting
+ORGANIZER;CN=Alice:mailto:alice@example.com
+ATTENDEE;CN=Bob;PARTSTAT=ACCEPTED:mailto:bob@example.com
+ATTENDEE;CN=Carol;PARTSTAT=TENTATIVE:mailto:carol@example.com
+ATTENDEE;CN=Dave;PARTSTAT=DECLINED:mailto:dave@example.com
+END:VEVENT
+END:VCALENDAR`;
+
+    const event = parseICalEvent(ical, "/cal/event.ics");
+    expect(event).toBeDefined();
+    expect(event!.attendees).toHaveLength(3);
+    expect(event!.attendees![0].email).toBe("bob@example.com");
+    expect(event!.attendees![0].name).toBe("Bob");
+    expect(event!.attendees![0].status).toBe("ACCEPTED");
+    expect(event!.attendees![1].status).toBe("TENTATIVE");
+    expect(event!.attendees![2].status).toBe("DECLINED");
+  });
+
+  it("parses event status", () => {
+    const ical = `BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+UID:cancelled@example.com
+DTSTART:20241204T100000Z
+SUMMARY:Cancelled Meeting
+STATUS:CANCELLED
+END:VEVENT
+END:VCALENDAR`;
+
+    const event = parseICalEvent(ical, "/cal/event.ics");
+    expect(event).toBeDefined();
+    expect(event!.status).toBe("CANCELLED");
+  });
+});
+
 describe("createCalendarClient", () => {
   it("creates a client with the correct Fastmail URL format", async () => {
     // This tests that createCalendarClient constructs the right URL

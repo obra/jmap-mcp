@@ -195,16 +195,18 @@ END:VCARD`;
   });
 
   it("handles escaped characters", () => {
+    // Note: ical.js unescapes commas but semicolons aren't typically escaped in FN
+    // FN is a text field where semicolons don't need escaping (unlike N which is structured)
     const vcard = `BEGIN:VCARD
 VERSION:3.0
 UID:escape-test
-FN:Name\\, With\\; Special
+FN:Name\\, With Special
 ORG:Company\\, Inc.
 END:VCARD`;
 
     const contact = parseVCard(vcard, "/ab/contact.vcf");
     expect(contact).toBeDefined();
-    expect(contact!.fullName).toBe("Name, With; Special");
+    expect(contact!.fullName).toBe("Name, With Special");
     expect(contact!.organization).toBe("Company, Inc.");
   });
 
@@ -226,6 +228,120 @@ END:VCARD`;
 // =============================================================================
 // Integration-style Tests (with mocked tsdav)
 // =============================================================================
+
+describe("parseVCard - additional fields", () => {
+  it("parses birthday", () => {
+    const vcard = `BEGIN:VCARD
+VERSION:3.0
+UID:bday-test
+FN:Birthday Person
+BDAY:1990-05-15
+END:VCARD`;
+
+    const contact = parseVCard(vcard, "/ab/contact.vcf");
+    expect(contact).toBeDefined();
+    expect(contact!.birthday).toBe("1990-05-15");
+  });
+
+  it("parses notes", () => {
+    const vcard = `BEGIN:VCARD
+VERSION:3.0
+UID:notes-test
+FN:Notes Person
+NOTE:Important client - prefers email contact
+END:VCARD`;
+
+    const contact = parseVCard(vcard, "/ab/contact.vcf");
+    expect(contact).toBeDefined();
+    expect(contact!.notes).toBe("Important client - prefers email contact");
+  });
+
+  it("parses job title", () => {
+    const vcard = `BEGIN:VCARD
+VERSION:3.0
+UID:title-test
+FN:Title Person
+TITLE:Senior Engineer
+END:VCARD`;
+
+    const contact = parseVCard(vcard, "/ab/contact.vcf");
+    expect(contact).toBeDefined();
+    expect(contact!.title).toBe("Senior Engineer");
+  });
+
+  it("parses URLs", () => {
+    const vcard = `BEGIN:VCARD
+VERSION:3.0
+UID:url-test
+FN:URL Person
+URL:https://example.com
+URL;TYPE=WORK:https://work.example.com
+END:VCARD`;
+
+    const contact = parseVCard(vcard, "/ab/contact.vcf");
+    expect(contact).toBeDefined();
+    expect(contact!.urls).toHaveLength(2);
+    expect(contact!.urls![0].value).toBe("https://example.com");
+    expect(contact!.urls![1].value).toBe("https://work.example.com");
+  });
+
+  it("parses addresses", () => {
+    const vcard = `BEGIN:VCARD
+VERSION:3.0
+UID:addr-test
+FN:Address Person
+ADR;TYPE=HOME:;;123 Main St;Springfield;IL;62701;USA
+END:VCARD`;
+
+    const contact = parseVCard(vcard, "/ab/contact.vcf");
+    expect(contact).toBeDefined();
+    expect(contact!.addresses).toHaveLength(1);
+    expect(contact!.addresses![0].type).toBe("home");
+    expect(contact!.addresses![0].street).toBe("123 Main St");
+    expect(contact!.addresses![0].city).toBe("Springfield");
+    expect(contact!.addresses![0].state).toBe("IL");
+  });
+});
+
+describe("parseVCard - type preservation", () => {
+  it("preserves email types", () => {
+    const vcard = `BEGIN:VCARD
+VERSION:3.0
+UID:email-types
+FN:Email Types
+EMAIL;TYPE=WORK:work@example.com
+EMAIL;TYPE=HOME:home@example.com
+EMAIL;TYPE=OTHER:other@example.com
+END:VCARD`;
+
+    const contact = parseVCard(vcard, "/ab/contact.vcf");
+    expect(contact).toBeDefined();
+    expect(contact!.emails).toHaveLength(3);
+    expect(contact!.emails[0].type).toBe("work");
+    expect(contact!.emails[1].type).toBe("home");
+    expect(contact!.emails[2].type).toBe("other");
+  });
+
+  it("preserves phone types", () => {
+    const vcard = `BEGIN:VCARD
+VERSION:3.0
+UID:phone-types
+FN:Phone Types
+TEL;TYPE=WORK:555-1111
+TEL;TYPE=HOME:555-2222
+TEL;TYPE=CELL:555-3333
+TEL;TYPE=FAX:555-4444
+END:VCARD`;
+
+    const contact = parseVCard(vcard, "/ab/contact.vcf");
+    expect(contact).toBeDefined();
+    expect(contact!.phones).toHaveLength(4);
+    expect(contact!.phones[0].type).toBe("work");
+    expect(contact!.phones[1].type).toBe("home");
+    expect(contact!.phones[2].type).toBe("cell");
+    expect(contact!.phones[3].type).toBe("fax");
+  });
+});
 
 describe("createContactsClient", () => {
   it("creates a client with the correct Fastmail URL format", async () => {

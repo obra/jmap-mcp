@@ -1,4 +1,5 @@
 import { DAVClient, DAVCalendar, DAVCalendarObject } from "tsdav";
+import ICAL from "ical.js";
 
 // =============================================================================
 // Types
@@ -12,6 +13,26 @@ export interface CalendarInfo {
   description?: string;
 }
 
+export interface Attendee {
+  email: string;
+  name?: string;
+  status?: string; // ACCEPTED, DECLINED, TENTATIVE, NEEDS-ACTION
+}
+
+export interface Organizer {
+  email: string;
+  name?: string;
+}
+
+export interface RecurrenceInfo {
+  frequency: string; // DAILY, WEEKLY, MONTHLY, YEARLY
+  interval?: number;
+  count?: number;
+  until?: Date;
+  byDay?: string[]; // MO, TU, WE, TH, FR, SA, SU
+  humanReadable: string;
+}
+
 export interface CalendarEvent {
   uid: string;
   url: string;
@@ -21,6 +42,10 @@ export interface CalendarEvent {
   location?: string;
   description?: string;
   allDay: boolean;
+  status?: string; // CONFIRMED, TENTATIVE, CANCELLED
+  organizer?: Organizer;
+  attendees?: Attendee[];
+  recurrence?: RecurrenceInfo;
 }
 
 export interface CalendarClientConfig {
@@ -87,12 +112,57 @@ export const formatCalendarEventAsCSV = (events: CalendarEvent[]): string => {
 };
 
 // =============================================================================
-// iCal Parsing
+// iCal Parsing (using ical.js)
 // =============================================================================
 
 /**
- * Parse iCal content and extract event details
- * Handles common iCal escaping and format variations
+ * Generate a human-readable description of a recurrence rule
+ */
+const formatRecurrenceHumanReadable = (rrule: any): string => {
+  const freq = rrule.freq?.toLowerCase() ?? "unknown";
+  const interval = rrule.interval ?? 1;
+  const parts: string[] = [];
+
+  // Frequency with interval
+  if (interval === 1) {
+    parts.push(freq);
+  } else {
+    parts.push(`every ${interval} ${freq.replace("ly", "")}s`);
+  }
+
+  // Days of week - ical.js uses getComponent() for parts
+  const byDay = rrule.getComponent?.('byday');
+  if (byDay && byDay.length > 0) {
+    const dayNames: Record<string, string> = {
+      SU: "Sunday", MO: "Monday", TU: "Tuesday", WE: "Wednesday",
+      TH: "Thursday", FR: "Friday", SA: "Saturday",
+    };
+    const days = byDay.map((d: string) => dayNames[d] ?? d);
+    parts.push(`on ${days.join(", ")}`);
+  }
+
+  // Count or until
+  if (rrule.count) {
+    parts.push(`(${rrule.count} times)`);
+  } else if (rrule.until) {
+    parts.push(`until ${rrule.until.toJSDate().toISOString().split("T")[0]}`);
+  }
+
+  return parts.join(" ");
+};
+
+/**
+ * Extract email from mailto: URI
+ */
+const extractEmail = (value: string): string => {
+  if (value.toLowerCase().startsWith("mailto:")) {
+    return value.slice(7);
+  }
+  return value;
+};
+
+/**
+ * Parse iCal content and extract event details using ical.js
  */
 export const parseICalEvent = (
   icalContent: string,
@@ -103,82 +173,114 @@ export const parseICalEvent = (
     return undefined;
   }
 
-  // Extract VEVENT block
-  const veventMatch = icalContent.match(/BEGIN:VEVENT[\s\S]*?END:VEVENT/);
-  if (!veventMatch) {
-    return undefined;
-  }
-  const vevent = veventMatch[0];
+  try {
+    const jcalData = ICAL.parse(icalContent);
+    const vcalendar = new ICAL.Component(jcalData);
+    const vevent = vcalendar.getFirstSubcomponent("vevent");
 
-  // Helper to extract a property value
-  const extractProperty = (name: string): string | undefined => {
-    // Handle properties with parameters like DTSTART;TZID=...:value
-    const regex = new RegExp(`^${name}(?:;[^:]*)?:(.*)$`, "m");
-    const match = vevent.match(regex);
-    if (match) {
-      // Unescape iCal escapes: \, -> , and \; -> ;
-      return match[1].trim().replace(/\\,/g, ",").replace(/\\;/g, ";").replace(/\\n/g, "\n");
-    }
-    return undefined;
-  };
-
-  // Parse date/datetime
-  const parseDateTime = (name: string): { date: Date | undefined; allDay: boolean } => {
-    // Check for VALUE=DATE (all-day)
-    const allDayRegex = new RegExp(`^${name};VALUE=DATE:(\\d{8})$`, "m");
-    const allDayMatch = vevent.match(allDayRegex);
-    if (allDayMatch) {
-      const dateStr = allDayMatch[1];
-      const year = parseInt(dateStr.slice(0, 4));
-      const month = parseInt(dateStr.slice(4, 6)) - 1;
-      const day = parseInt(dateStr.slice(6, 8));
-      return { date: new Date(Date.UTC(year, month, day)), allDay: true };
+    if (!vevent) {
+      return undefined;
     }
 
-    // Check for datetime with timezone or UTC
-    const dtRegex = new RegExp(`^${name}(?:;TZID=[^:]*)?:(\\d{8}T\\d{6}Z?)$`, "m");
-    const dtMatch = vevent.match(dtRegex);
-    if (dtMatch) {
-      const dtStr = dtMatch[1];
-      const year = parseInt(dtStr.slice(0, 4));
-      const month = parseInt(dtStr.slice(4, 6)) - 1;
-      const day = parseInt(dtStr.slice(6, 8));
-      const hour = parseInt(dtStr.slice(9, 11));
-      const minute = parseInt(dtStr.slice(11, 13));
-      const second = parseInt(dtStr.slice(13, 15));
+    const event = new ICAL.Event(vevent);
 
-      // If ends with Z, it's UTC
-      if (dtStr.endsWith("Z")) {
-        return { date: new Date(Date.UTC(year, month, day, hour, minute, second)), allDay: false };
+    // Get UID
+    const uid = event.uid;
+    if (!uid) {
+      return undefined;
+    }
+
+    // Get start date
+    const startTime = event.startDate;
+    if (!startTime) {
+      return undefined;
+    }
+
+    // Determine if all-day (DATE vs DATE-TIME)
+    const allDay = startTime.isDate;
+
+    // Convert ICAL.Time to JS Date
+    const start = startTime.toJSDate();
+    const end = event.endDate ? event.endDate.toJSDate() : undefined;
+
+    // Build the result
+    const result: CalendarEvent = {
+      uid,
+      url,
+      summary: event.summary ?? "",
+      start,
+      end,
+      location: event.location ?? undefined,
+      description: event.description ?? undefined,
+      allDay,
+    };
+
+    // Parse status
+    const statusProp = vevent.getFirstPropertyValue("status");
+    if (statusProp) {
+      result.status = String(statusProp).toUpperCase();
+    }
+
+    // Parse organizer
+    const organizerProp = vevent.getFirstProperty("organizer");
+    if (organizerProp) {
+      const orgValue = organizerProp.getFirstValue();
+      const orgCN = organizerProp.getParameter("cn");
+      result.organizer = {
+        email: extractEmail(String(orgValue)),
+        name: orgCN ? String(orgCN) : undefined,
+      };
+    }
+
+    // Parse attendees
+    const attendeeProps = vevent.getAllProperties("attendee");
+    if (attendeeProps.length > 0) {
+      result.attendees = attendeeProps.map((prop: any) => {
+        const value = prop.getFirstValue();
+        const cn = prop.getParameter("cn");
+        const partstat = prop.getParameter("partstat");
+        return {
+          email: extractEmail(String(value)),
+          name: cn ? String(cn) : undefined,
+          status: partstat ? String(partstat).toUpperCase() : undefined,
+        };
+      });
+    }
+
+    // Parse RRULE for recurrence
+    const rruleProp = vevent.getFirstProperty("rrule");
+    if (rruleProp) {
+      const rruleValue = rruleProp.getFirstValue();
+      if (rruleValue) {
+        const recurrence: RecurrenceInfo = {
+          frequency: rruleValue.freq,
+          humanReadable: formatRecurrenceHumanReadable(rruleValue),
+        };
+
+        if (rruleValue.interval && rruleValue.interval > 1) {
+          recurrence.interval = rruleValue.interval;
+        }
+        if (rruleValue.count) {
+          recurrence.count = rruleValue.count;
+        }
+        if (rruleValue.until) {
+          recurrence.until = rruleValue.until.toJSDate();
+        }
+        // ical.js stores BYDAY in getComponent() or parts.BYDAY
+        const byDay = rruleValue.getComponent('byday');
+        if (byDay && byDay.length > 0) {
+          recurrence.byDay = byDay;
+        }
+
+        result.recurrence = recurrence;
       }
-      // Otherwise treat as local (this is a simplification - proper timezone handling would need a library)
-      return { date: new Date(year, month, day, hour, minute, second), allDay: false };
     }
 
-    return { date: undefined, allDay: false };
-  };
-
-  const uid = extractProperty("UID");
-  const summary = extractProperty("SUMMARY");
-  const location = extractProperty("LOCATION");
-  const description = extractProperty("DESCRIPTION");
-  const { date: start, allDay } = parseDateTime("DTSTART");
-  const { date: end } = parseDateTime("DTEND");
-
-  if (!uid || !start) {
+    return result;
+  } catch (error) {
+    // If ical.js fails to parse, return undefined
     return undefined;
   }
-
-  return {
-    uid,
-    url,
-    summary: summary ?? "",
-    start,
-    end,
-    location,
-    description,
-    allDay,
-  };
 };
 
 // =============================================================================
