@@ -59,8 +59,8 @@ const SearchSchema = z.object({
   has_attachment: z.boolean().optional().describe(
     "Filter by attachment presence",
   ),
-  limit: z.number().min(1).max(100).default(20).describe(
-    "Maximum results (default 20)",
+  limit: z.number().min(1).max(100).default(50).describe(
+    "Maximum results (default 50)",
   ),
   offset: z.number().min(0).default(0).describe("Offset for pagination"),
 });

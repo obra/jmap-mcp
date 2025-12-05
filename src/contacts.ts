@@ -475,7 +475,7 @@ export const fetchAddressBooks = async (client: DAVClient): Promise<AddressBookI
   const addressBooks = await client.fetchAddressBooks();
   return addressBooks.map((ab: DAVAddressBook) => ({
     url: ab.url,
-    displayName: ab.displayName ?? "Unnamed",
+    displayName: String(ab.displayName ?? "Unnamed"),
     ctag: ab.ctag,
     description: (ab as any).addressBookDescription,
   }));
@@ -518,6 +518,10 @@ export const searchContacts = (
     }
     // Search in emails
     if (contact.emails.some((e) => e.value.toLowerCase().includes(lowerQuery))) {
+      return true;
+    }
+    // Search in phones
+    if (contact.phones.some((p) => p.value.includes(query))) {
       return true;
     }
     // Search in organization

@@ -90,7 +90,7 @@ export const formatCalendarAsCSV = (calendars: CalendarInfo[]): string => {
 };
 
 export const formatCalendarEventAsCSV = (events: CalendarEvent[]): string => {
-  const header = "uid,url,summary,start,end,location,description,all_day";
+  const header = "uid,url,summary,start,end,location,description,allDay";
   if (events.length === 0) {
     return `${header}\n# total=0`;
   }
@@ -250,8 +250,9 @@ export const parseICalEvent = (
     // Parse RRULE for recurrence
     const rruleProp = vevent.getFirstProperty("rrule");
     if (rruleProp) {
-      const rruleValue = rruleProp.getFirstValue();
-      if (rruleValue) {
+      // ical.js returns a Recur object but types are incomplete
+      const rruleValue = rruleProp.getFirstValue() as any;
+      if (rruleValue && rruleValue.freq) {
         const recurrence: RecurrenceInfo = {
           frequency: rruleValue.freq,
           humanReadable: formatRecurrenceHumanReadable(rruleValue),
@@ -267,7 +268,7 @@ export const parseICalEvent = (
           recurrence.until = rruleValue.until.toJSDate();
         }
         // ical.js stores BYDAY in getComponent() or parts.BYDAY
-        const byDay = rruleValue.getComponent('byday');
+        const byDay = rruleValue.getComponent?.('byday');
         if (byDay && byDay.length > 0) {
           recurrence.byDay = byDay;
         }
@@ -287,6 +288,14 @@ export const parseICalEvent = (
 // iCal Generation (using ical.js)
 // =============================================================================
 
+export interface RecurrenceParams {
+  frequency: "daily" | "weekly" | "monthly" | "yearly";
+  interval?: number; // Every N days/weeks/months/years (default 1)
+  count?: number; // Number of occurrences
+  until?: Date; // End date for recurrence
+  byDay?: string[]; // Days of week: MO, TU, WE, TH, FR, SA, SU
+}
+
 export interface CreateEventParams {
   summary: string;
   start: Date;
@@ -294,6 +303,7 @@ export interface CreateEventParams {
   allDay?: boolean;
   location?: string;
   description?: string;
+  recurrence?: RecurrenceParams;
 }
 
 /**
@@ -344,6 +354,26 @@ export const createICalString = (params: CreateEventParams): { icalString: strin
   }
   if (params.description) {
     vevent.updatePropertyWithValue("description", params.description);
+  }
+
+  // Recurrence rule
+  if (params.recurrence) {
+    const rrule = new ICAL.Recur({
+      freq: params.recurrence.frequency.toUpperCase(),
+      interval: params.recurrence.interval || 1,
+    });
+
+    if (params.recurrence.count) {
+      rrule.count = params.recurrence.count;
+    }
+    if (params.recurrence.until) {
+      rrule.until = ICAL.Time.fromJSDate(params.recurrence.until, false);
+    }
+    if (params.recurrence.byDay && params.recurrence.byDay.length > 0) {
+      rrule.setComponent("byday", params.recurrence.byDay.map((d) => d.toUpperCase()));
+    }
+
+    vevent.updatePropertyWithValue("rrule", rrule);
   }
 
   vcalendar.addSubcomponent(vevent);
@@ -407,7 +437,8 @@ export const updateICalString = (
     // Just changing allDay flag without changing the time
     const dtstart = vevent.getFirstProperty("dtstart");
     if (dtstart) {
-      const currentTime = dtstart.getFirstValue();
+      // ical.js returns Time but types are incomplete
+      const currentTime = dtstart.getFirstValue() as any;
       if (currentTime) {
         currentTime.isDate = updates.allDay;
         dtstart.setValue(currentTime);
@@ -481,7 +512,7 @@ export const fetchCalendars = async (client: DAVClient): Promise<CalendarInfo[]>
   const calendars = await client.fetchCalendars();
   return calendars.map((cal: DAVCalendar) => ({
     url: cal.url,
-    displayName: cal.displayName ?? "Unnamed",
+    displayName: String(cal.displayName ?? "Unnamed"),
     ctag: cal.ctag,
     // tsdav includes these in props
     color: (cal as any).calendarColor,

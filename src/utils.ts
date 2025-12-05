@@ -791,7 +791,7 @@ export const toJSON = (data: unknown): string => {
   return JSON.stringify(data);
 };
 
-export const mcpResponse = (text: string) => ({
+export const mcpResponse = (text: string, _isError?: boolean) => ({
   content: [{ type: "text" as const, text }],
 });
 

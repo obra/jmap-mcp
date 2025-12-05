@@ -12,6 +12,7 @@ import {
   createVCardString,
   updateVCardString,
   generateVCardFilename,
+  parseVCard,
   ContactsClientConfig,
 } from "../contacts.js";
 import { formatError, mcpResponse } from "../utils.js";
@@ -24,10 +25,10 @@ const AddressBooksSchema = z.object({});
 
 const ContactsSchema = z.object({
   addressBook: z.string().optional().describe(
-    "Address book URL or display name. If omitted, returns contacts from all address books."
+    "Address book URL, display name, or 'default' for primary. If omitted, returns contacts from all address books."
   ),
   query: z.string().optional().describe(
-    "Search query to filter contacts by name, email, or organization"
+    "Search query to filter contacts by name, email, phone, or organization"
   ),
   limit: z.number().min(1).max(100).default(50).describe(
     "Maximum contacts to return (default 50)"
@@ -44,18 +45,40 @@ const PhoneSchema = z.object({
   value: z.string().min(1).describe("Phone number"),
 });
 
+// Accept either simple strings or objects with type/value
+const EmailInputSchema = z.union([
+  z.string().email(),
+  EmailSchema,
+]);
+
+const PhoneInputSchema = z.union([
+  z.string().min(1),
+  PhoneSchema,
+]);
+
+// Normalize mixed input to consistent format
+const normalizeEmails = (emails?: Array<string | { type?: string; value: string }>): Array<{ type?: string; value: string }> => {
+  if (!emails) return [];
+  return emails.map((e) => (typeof e === "string" ? { value: e } : e));
+};
+
+const normalizePhones = (phones?: Array<string | { type?: string; value: string }>): Array<{ type?: string; value: string }> => {
+  if (!phones) return [];
+  return phones.map((p) => (typeof p === "string" ? { value: p } : p));
+};
+
 const CreateContactSchema = z.object({
-  addressBook: z.string().min(1).describe(
-    "Address book to add contact to (URL or display name). Use 'address_books' tool to list available address books."
+  addressBook: z.string().min(1).default("default").describe(
+    "Address book to add contact to (URL, display name, or 'default' for primary address book)"
   ),
   fullName: z.string().min(1).describe(
     "Contact's full name"
   ),
-  emails: z.array(EmailSchema).optional().describe(
-    'Email addresses with optional types, e.g., [{"type": "work", "value": "john@work.com"}]'
+  emails: z.array(EmailInputSchema).optional().describe(
+    'Email addresses. Simple strings ["john@work.com"] or objects [{"type": "work", "value": "john@work.com"}]'
   ),
-  phones: z.array(PhoneSchema).optional().describe(
-    'Phone numbers with optional types, e.g., [{"type": "cell", "value": "+1-555-1234"}]'
+  phones: z.array(PhoneInputSchema).optional().describe(
+    'Phone numbers. Simple strings ["+1-555-1234"] or objects [{"type": "cell", "value": "+1-555-1234"}]'
   ),
   organization: z.string().optional().describe(
     "Company or organization name"
@@ -69,16 +92,16 @@ const CreateContactSchema = z.object({
 });
 
 const UpdateContactSchema = z.object({
-  url: z.string().url().describe(
-    "The full URL of the contact to update (returned by 'contacts' tool or 'create_contact')"
+  contact: z.string().describe(
+    "Contact URL (from 'contacts' tool) OR unique search query (name/email/phone). If query matches multiple contacts, operation fails."
   ),
   fullName: z.string().optional().describe(
     "New full name for the contact"
   ),
-  emails: z.array(EmailSchema).optional().describe(
+  emails: z.array(EmailInputSchema).optional().describe(
     'New email addresses (replaces all existing). Use [] to clear.'
   ),
-  phones: z.array(PhoneSchema).optional().describe(
+  phones: z.array(PhoneInputSchema).optional().describe(
     'New phone numbers (replaces all existing). Use [] to clear.'
   ),
   organization: z.string().optional().describe(
@@ -93,8 +116,8 @@ const UpdateContactSchema = z.object({
 });
 
 const DeleteContactSchema = z.object({
-  url: z.string().url().describe(
-    "The full URL of the contact to delete (returned by 'contacts' tool or 'create_contact')"
+  contact: z.string().describe(
+    "Contact URL (from 'contacts' tool) OR unique search query (name/email/phone). If query matches multiple contacts, operation fails."
   ),
 });
 
@@ -135,13 +158,23 @@ export function registerContactsTools(
     nameOrUrl: string
   ): Promise<DAVAddressBook | undefined> => {
     const addressBooks = await getAddressBooks(client);
+
+    // Handle 'default' keyword - return first non-hidden address book
+    if (nameOrUrl.toLowerCase() === "default") {
+      return addressBooks.find((ab) => {
+        const name = typeof ab.displayName === "string" ? ab.displayName : "";
+        return !name.startsWith("_");
+      }) || addressBooks[0];
+    }
+
     // First try exact URL match
     const byUrl = addressBooks.find((ab) => ab.url === nameOrUrl);
     if (byUrl) return byUrl;
     // Then try display name match (case-insensitive)
-    const byName = addressBooks.find(
-      (ab) => ab.displayName?.toLowerCase() === nameOrUrl.toLowerCase()
-    );
+    const byName = addressBooks.find((ab) => {
+      const name = typeof ab.displayName === "string" ? ab.displayName : "";
+      return name.toLowerCase() === nameOrUrl.toLowerCase();
+    });
     return byName;
   };
 
@@ -188,8 +221,9 @@ Filter by address book or search by name/email/organization.`,
         if (args.addressBook) {
           const resolved = await resolveAddressBook(client, args.addressBook);
           if (!resolved) {
+            const available = addressBooks.map((ab) => ab.displayName).join(", ");
             return mcpResponse(
-              `Address book not found: "${args.addressBook}". Use the 'address_books' tool to list available address books.`,
+              `Address book not found: "${args.addressBook}". Available: ${available}`,
               true
             );
           }
@@ -229,7 +263,7 @@ Filter by address book or search by name/email/organization.`,
     "create_contact",
     `Create a new contact.
 
-Example: create_contact(addressBook: "Default", fullName: "John Doe", emails: [{"type": "work", "value": "john@work.com"}], phones: [{"type": "cell", "value": "+1-555-1234"}])
+Example: create_contact(fullName: "John Doe", emails: ["john@work.com"], phones: ["+1-555-1234"])
 
 Returns the created contact's UID and URL on success.`,
     CreateContactSchema.shape,
@@ -240,17 +274,23 @@ Returns the created contact's UID and URL on success.`,
         // Resolve address book by name or URL
         const addressBook = await resolveAddressBook(client, args.addressBook);
         if (!addressBook) {
+          const addressBooks = await getAddressBooks(client);
+          const available = addressBooks.map((ab) => ab.displayName).join(", ");
           return mcpResponse(
-            `Address book not found: "${args.addressBook}". Use the 'address_books' tool to list available address books.`,
+            `Address book not found: "${args.addressBook}". Available: ${available}`,
             true
           );
         }
 
+        // Normalize emails and phones to consistent format
+        const emails = normalizeEmails(args.emails as any);
+        const phones = normalizePhones(args.phones as any);
+
         // Create vCard string
         const { vCardString, uid } = createVCardString({
           fullName: args.fullName,
-          emails: args.emails,
-          phones: args.phones,
+          emails,
+          phones,
           organization: args.organization,
           title: args.title,
           notes: args.notes,
@@ -287,43 +327,92 @@ Returns the created contact's UID and URL on success.`,
   // update_contact - Update an existing contact
   // ---------------------------------------------------------------------------
 
+  // Helper to resolve contact by URL or query
+  const resolveContactUrl = async (
+    client: DAVClient,
+    contactRef: string
+  ): Promise<{ url: string; data: string; etag?: string } | { error: string }> => {
+    // Check if it's a URL
+    if (contactRef.startsWith("http")) {
+      // Extract address book URL from contact URL (everything before the last path segment)
+      const urlParts = contactRef.split("/");
+      const addressBookUrl = urlParts.slice(0, -1).join("/") + "/";
+
+      const fetchResponse = await client.fetchVCards({
+        addressBook: { url: addressBookUrl } as DAVAddressBook,
+        objectUrls: [contactRef],
+      });
+      if (!fetchResponse || fetchResponse.length === 0 || !fetchResponse[0].data) {
+        return { error: `Contact not found: "${contactRef}"` };
+      }
+      return { url: contactRef, data: fetchResponse[0].data, etag: fetchResponse[0].etag };
+    }
+
+    // Otherwise, search for the contact
+    const addressBooks = await getAddressBooks(client);
+    let allContacts: Array<{ url: string; data: string; etag?: string; parsed: any }> = [];
+
+    for (const addressBook of addressBooks) {
+      const vcards = await client.fetchVCards({ addressBook });
+      for (const vcard of vcards) {
+        if (vcard.data) {
+          const parsed = parseVCard(vcard.data, vcard.url);
+          if (parsed) {
+            allContacts.push({ url: vcard.url, data: vcard.data, etag: vcard.etag, parsed });
+          }
+        }
+      }
+    }
+
+    // Search for matches
+    const matches = allContacts.filter((c) => {
+      const lowerQuery = contactRef.toLowerCase();
+      return (
+        c.parsed.fullName.toLowerCase().includes(lowerQuery) ||
+        c.parsed.emails.some((e: any) => e.value.toLowerCase().includes(lowerQuery)) ||
+        c.parsed.phones.some((p: any) => p.value.includes(contactRef)) ||
+        c.parsed.organization?.toLowerCase().includes(lowerQuery)
+      );
+    });
+
+    if (matches.length === 0) {
+      return { error: `No contact found matching: "${contactRef}"` };
+    }
+    if (matches.length > 1) {
+      const names = matches.map((c) => c.parsed.fullName).join(", ");
+      return { error: `Multiple contacts found matching "${contactRef}": ${names}. Use the exact URL from 'contacts' tool.` };
+    }
+
+    return { url: matches[0].url, data: matches[0].data, etag: matches[0].etag };
+  };
+
   server.tool(
     "update_contact",
     `Update an existing contact.
 
-Example: update_contact(url: "https://carddav.fastmail.com/.../contact.vcf", fullName: "John Smith", organization: "New Corp")
+Example: update_contact(contact: "John Doe", phones: ["+1-555-9999"])
 
-Only provide fields you want to change. Use empty string to clear text fields, empty array [] to clear emails/phones.`,
+Accepts contact URL or unique search query (name/email/phone). Use empty string to clear text, [] to clear arrays.`,
     UpdateContactSchema.shape,
     async (args) => {
       try {
         const client = await getClient();
 
-        // Fetch the existing contact
-        const fetchResponse = await client.fetchVCards({
-          objectUrls: [args.url],
-        });
-
-        if (!fetchResponse || fetchResponse.length === 0) {
-          return mcpResponse(
-            `Contact not found: "${args.url}"`,
-            true
-          );
+        // Resolve contact by URL or query
+        const resolved = await resolveContactUrl(client, args.contact);
+        if ("error" in resolved) {
+          return mcpResponse(resolved.error, true);
         }
 
-        const existingContact = fetchResponse[0];
-        if (!existingContact.data) {
-          return mcpResponse(
-            `Contact has no data: "${args.url}"`,
-            true
-          );
-        }
+        // Normalize emails and phones
+        const emails = args.emails !== undefined ? normalizeEmails(args.emails as any) : undefined;
+        const phones = args.phones !== undefined ? normalizePhones(args.phones as any) : undefined;
 
         // Update the vCard string
-        const updatedVCardString = updateVCardString(existingContact.data, {
+        const updatedVCardString = updateVCardString(resolved.data, {
           fullName: args.fullName,
-          emails: args.emails,
-          phones: args.phones,
+          emails,
+          phones,
           organization: args.organization,
           title: args.title,
           notes: args.notes,
@@ -332,9 +421,9 @@ Only provide fields you want to change. Use empty string to clear text fields, e
         // Update the contact via CardDAV
         const response = await client.updateVCard({
           vCard: {
-            url: args.url,
+            url: resolved.url,
             data: updatedVCardString,
-            etag: existingContact.etag,
+            etag: resolved.etag,
           },
         });
 
@@ -358,19 +447,25 @@ Only provide fields you want to change. Use empty string to clear text fields, e
 
   server.tool(
     "delete_contact",
-    `Delete a contact by URL.
+    `Delete a contact.
 
-Get the contact URL from the 'contacts' tool or 'create_contact' response.
+Example: delete_contact(contact: "John Doe")
 
-Example: delete_contact(url: "https://carddav.fastmail.com/dav/addressbooks/.../contact.vcf")`,
+Accepts contact URL or unique search query (name/email/phone).`,
     DeleteContactSchema.shape,
     async (args) => {
       try {
         const client = await getClient();
 
-        // Delete by URL without etag
+        // Resolve contact by URL or query
+        const resolved = await resolveContactUrl(client, args.contact);
+        if ("error" in resolved) {
+          return mcpResponse(resolved.error, true);
+        }
+
+        // Delete by URL
         const response = await client.deleteObject({
-          url: args.url,
+          url: resolved.url,
         });
 
         if (!response.ok) {

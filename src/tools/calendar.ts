@@ -23,7 +23,10 @@ const CalendarsSchema = z.object({});
 
 const EventsSchema = z.object({
   calendar: z.string().optional().describe(
-    "Calendar URL or display name to fetch events from. If omitted, returns events from all calendars."
+    "Calendar URL, display name, or 'default' for primary calendar. If omitted, returns events from all calendars."
+  ),
+  query: z.string().optional().describe(
+    "Search query to filter events by summary, location, or description"
   ),
   after: z.string().optional().describe(
     'Only events starting after this date (ISO 8601 or YYYY-MM-DD, e.g., "2024-12-01")'
@@ -36,9 +39,27 @@ const EventsSchema = z.object({
   ),
 });
 
+const RecurrenceSchema = z.object({
+  frequency: z.enum(["daily", "weekly", "monthly", "yearly"]).describe(
+    "How often the event repeats"
+  ),
+  interval: z.number().min(1).optional().describe(
+    "Repeat every N days/weeks/months/years (default 1)"
+  ),
+  count: z.number().min(1).optional().describe(
+    "Number of occurrences (mutually exclusive with 'until')"
+  ),
+  until: z.string().optional().describe(
+    "End date for recurrence in ISO 8601 format (mutually exclusive with 'count')"
+  ),
+  byDay: z.array(z.enum(["MO", "TU", "WE", "TH", "FR", "SA", "SU"])).optional().describe(
+    'Days of week for weekly recurrence, e.g., ["MO", "WE", "FR"]'
+  ),
+});
+
 const CreateEventSchema = z.object({
-  calendar: z.string().min(1).describe(
-    "Calendar to add event to (URL or display name). Use 'calendars' tool to list available calendars."
+  calendar: z.string().min(1).default("default").describe(
+    "Calendar to add event to (URL, display name, or 'default' for primary calendar)"
   ),
   summary: z.string().min(1).describe(
     "Event title/summary"
@@ -49,7 +70,7 @@ const CreateEventSchema = z.object({
   end: z.string().optional().describe(
     'End date/time. Same format as start. Omit for instantaneous events or all-day events spanning one day.'
   ),
-  all_day: z.boolean().optional().describe(
+  allDay: z.boolean().optional().describe(
     "Set to true for all-day events (ignores time portion of start/end)"
   ),
   location: z.string().optional().describe(
@@ -57,6 +78,9 @@ const CreateEventSchema = z.object({
   ),
   description: z.string().optional().describe(
     "Event description/notes"
+  ),
+  recurrence: RecurrenceSchema.optional().describe(
+    'Make this a recurring event. Example: {frequency: "weekly", byDay: ["MO", "WE", "FR"]}'
   ),
 });
 
@@ -73,7 +97,7 @@ const UpdateEventSchema = z.object({
   end: z.string().optional().describe(
     'New end date/time. Same format as start.'
   ),
-  all_day: z.boolean().optional().describe(
+  allDay: z.boolean().optional().describe(
     "Set to true for all-day events"
   ),
   location: z.string().optional().describe(
@@ -127,13 +151,23 @@ export function registerCalendarTools(
     nameOrUrl: string
   ): Promise<DAVCalendar | undefined> => {
     const calendars = await getCalendars(client);
+
+    // Handle 'default' keyword - return first non-hidden calendar
+    if (nameOrUrl.toLowerCase() === "default") {
+      return calendars.find((c) => {
+        const name = typeof c.displayName === "string" ? c.displayName : "";
+        return !name.startsWith("_");
+      }) || calendars[0];
+    }
+
     // First try exact URL match
     const byUrl = calendars.find((c) => c.url === nameOrUrl);
     if (byUrl) return byUrl;
     // Then try display name match (case-insensitive)
-    const byName = calendars.find(
-      (c) => c.displayName?.toLowerCase() === nameOrUrl.toLowerCase()
-    );
+    const byName = calendars.find((c) => {
+      const name = typeof c.displayName === "string" ? c.displayName : "";
+      return name.toLowerCase() === nameOrUrl.toLowerCase();
+    });
     return byName;
   };
 
@@ -167,8 +201,8 @@ Use the URL or display_name when fetching events from a specific calendar.`,
     "events",
     `Get calendar events from Fastmail.
 
-Returns: uid, url, summary, start, end, location, description, all_day
-Filter by calendar, date range, or get all events.`,
+Returns: uid, url, summary, start, end, location, description, allDay
+Filter by calendar, search query, or date range.`,
     EventsSchema.shape,
     async (args) => {
       try {
@@ -180,8 +214,9 @@ Filter by calendar, date range, or get all events.`,
         if (args.calendar) {
           const resolved = await resolveCalendar(client, args.calendar);
           if (!resolved) {
+            const available = calendars.map((c) => c.displayName).join(", ");
             return mcpResponse(
-              `Calendar not found: "${args.calendar}". Use the 'calendars' tool to list available calendars.`,
+              `Calendar not found: "${args.calendar}". Available: ${available}`,
               true
             );
           }
@@ -197,10 +232,20 @@ Filter by calendar, date range, or get all events.`,
         }
 
         // Fetch events from all target calendars
-        const allEvents = [];
+        let allEvents = [];
         for (const calendar of targetCalendars) {
           const events = await fetchCalendarEvents(client, calendar, { timeRange });
           allEvents.push(...events);
+        }
+
+        // Apply search filter if provided
+        if (args.query) {
+          const lowerQuery = args.query.toLowerCase();
+          allEvents = allEvents.filter((event) =>
+            event.summary?.toLowerCase().includes(lowerQuery) ||
+            event.location?.toLowerCase().includes(lowerQuery) ||
+            event.description?.toLowerCase().includes(lowerQuery)
+          );
         }
 
         // Sort by start date
@@ -224,7 +269,10 @@ Filter by calendar, date range, or get all events.`,
     "create_event",
     `Create a new calendar event.
 
-Example: create_event(calendar: "Personal", summary: "Team Meeting", start: "2024-12-04T10:00:00Z", end: "2024-12-04T11:00:00Z", location: "Conference Room A")
+Examples:
+  create_event(calendar: "Personal", summary: "Team Meeting", start: "2024-12-04T10:00:00Z", end: "2024-12-04T11:00:00Z")
+  create_event(summary: "Weekly Standup", start: "2024-12-04T09:00:00Z", recurrence: {frequency: "weekly", byDay: ["MO", "WE", "FR"]})
+  create_event(summary: "Daily Check-in", start: "2024-12-04T10:00:00Z", recurrence: {frequency: "daily", count: 30})
 
 Returns the created event's UID and URL on success.`,
     CreateEventSchema.shape,
@@ -235,8 +283,10 @@ Returns the created event's UID and URL on success.`,
         // Resolve calendar by name or URL
         const calendar = await resolveCalendar(client, args.calendar);
         if (!calendar) {
+          const calendars = await getCalendars(client);
+          const available = calendars.map((c) => c.displayName).join(", ");
           return mcpResponse(
-            `Calendar not found: "${args.calendar}". Use the 'calendars' tool to list available calendars.`,
+            `Calendar not found: "${args.calendar}". Available: ${available}`,
             true
           );
         }
@@ -255,14 +305,41 @@ Returns the created event's UID and URL on success.`,
           }
         }
 
+        // Parse recurrence if provided
+        let recurrence: {
+          frequency: "daily" | "weekly" | "monthly" | "yearly";
+          interval?: number;
+          count?: number;
+          until?: Date;
+          byDay?: string[];
+        } | undefined;
+
+        if (args.recurrence) {
+          recurrence = {
+            frequency: args.recurrence.frequency,
+            interval: args.recurrence.interval,
+            count: args.recurrence.count,
+            byDay: args.recurrence.byDay,
+          };
+
+          if (args.recurrence.until) {
+            const untilDate = new Date(args.recurrence.until);
+            if (isNaN(untilDate.getTime())) {
+              return mcpResponse(`Invalid recurrence until date: "${args.recurrence.until}"`, true);
+            }
+            recurrence.until = untilDate;
+          }
+        }
+
         // Create iCal string
         const { icalString, uid } = createICalString({
           summary: args.summary,
           start,
           end,
-          allDay: args.all_day,
+          allDay: args.allDay,
           location: args.location,
           description: args.description,
+          recurrence,
         });
 
         // Create the event via CalDAV
@@ -308,8 +385,13 @@ Only provide fields you want to change. Use empty string to clear location/descr
       try {
         const client = await getClient();
 
+        // Extract calendar URL from event URL (everything before the last path segment)
+        const eventUrlParts = args.url.split("/");
+        const calendarUrl = eventUrlParts.slice(0, -1).join("/") + "/";
+
         // Fetch the existing event
         const fetchResponse = await client.fetchCalendarObjects({
+          calendar: { url: calendarUrl } as DAVCalendar,
           objectUrls: [args.url],
         });
 
@@ -350,7 +432,7 @@ Only provide fields you want to change. Use empty string to clear location/descr
           summary: args.summary,
           start,
           end,
-          allDay: args.all_day,
+          allDay: args.allDay,
           location: args.location,
           description: args.description,
         });
