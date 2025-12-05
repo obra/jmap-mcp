@@ -260,6 +260,88 @@ export const parseVCard = (
 };
 
 // =============================================================================
+// vCard Generation (using ical.js)
+// =============================================================================
+
+export interface CreateContactParams {
+  fullName: string;
+  emails?: Array<{ type?: string; value: string }>;
+  phones?: Array<{ type?: string; value: string }>;
+  organization?: string;
+  title?: string;
+  notes?: string;
+}
+
+/**
+ * Generate a unique UID for a new contact
+ */
+const generateContactUid = (): string => {
+  const timestamp = Date.now();
+  const random = Math.random().toString(36).substring(2, 10);
+  return `${timestamp}-${random}@fastmail-aibo`;
+};
+
+/**
+ * Create a vCard string for a new contact using ical.js
+ */
+export const createVCardString = (params: CreateContactParams): { vCardString: string; uid: string } => {
+  const uid = generateContactUid();
+
+  // Create VCARD component
+  const vcard = new ICAL.Component(["vcard", [], []]);
+  vcard.updatePropertyWithValue("version", "3.0");
+  vcard.updatePropertyWithValue("uid", uid);
+  vcard.updatePropertyWithValue("fn", params.fullName);
+
+  // Add optional fields
+  if (params.organization) {
+    vcard.updatePropertyWithValue("org", params.organization);
+  }
+  if (params.title) {
+    vcard.updatePropertyWithValue("title", params.title);
+  }
+  if (params.notes) {
+    vcard.updatePropertyWithValue("note", params.notes);
+  }
+
+  // Add emails with types
+  if (params.emails && params.emails.length > 0) {
+    for (const email of params.emails) {
+      const prop = new ICAL.Property("email");
+      prop.setValue(email.value);
+      if (email.type) {
+        prop.setParameter("type", email.type.toUpperCase());
+      }
+      vcard.addProperty(prop);
+    }
+  }
+
+  // Add phones with types
+  if (params.phones && params.phones.length > 0) {
+    for (const phone of params.phones) {
+      const prop = new ICAL.Property("tel");
+      prop.setValue(phone.value);
+      if (phone.type) {
+        prop.setParameter("type", phone.type.toUpperCase());
+      }
+      vcard.addProperty(prop);
+    }
+  }
+
+  return {
+    vCardString: vcard.toString(),
+    uid,
+  };
+};
+
+/**
+ * Generate vCard filename from UID
+ */
+export const generateVCardFilename = (uid: string): string => {
+  return `${uid}.vcf`;
+};
+
+// =============================================================================
 // CardDAV Client
 // =============================================================================
 

@@ -9,6 +9,8 @@ import {
   searchContacts,
   formatAddressBookAsCSV,
   formatContactAsCSV,
+  createVCardString,
+  generateVCardFilename,
   ContactsClientConfig,
 } from "../contacts.js";
 import { formatError, mcpResponse } from "../utils.js";
@@ -28,6 +30,46 @@ const ContactsSchema = z.object({
   ),
   limit: z.number().min(1).max(100).default(50).describe(
     "Maximum contacts to return (default 50)"
+  ),
+});
+
+const EmailSchema = z.object({
+  type: z.string().optional().describe("Email type: work, home, other"),
+  value: z.string().describe("Email address"),
+});
+
+const PhoneSchema = z.object({
+  type: z.string().optional().describe("Phone type: cell, work, home, fax, other"),
+  value: z.string().describe("Phone number"),
+});
+
+const CreateContactSchema = z.object({
+  addressBook: z.string().describe(
+    "Address book to add contact to (URL or display name). Use 'address_books' tool to list available address books."
+  ),
+  fullName: z.string().describe(
+    "Contact's full name"
+  ),
+  emails: z.array(EmailSchema).optional().describe(
+    'Email addresses with optional types, e.g., [{"type": "work", "value": "john@work.com"}]'
+  ),
+  phones: z.array(PhoneSchema).optional().describe(
+    'Phone numbers with optional types, e.g., [{"type": "cell", "value": "+1-555-1234"}]'
+  ),
+  organization: z.string().optional().describe(
+    "Company or organization name"
+  ),
+  title: z.string().optional().describe(
+    "Job title"
+  ),
+  notes: z.string().optional().describe(
+    "Additional notes about the contact"
+  ),
+});
+
+const DeleteContactSchema = z.object({
+  url: z.string().describe(
+    "The full URL of the contact to delete (returned by 'contacts' tool or 'create_contact')"
   ),
 });
 
@@ -148,6 +190,103 @@ Filter by address book or search by name/email/organization.`,
         const limited = allContacts.slice(0, args.limit);
 
         return mcpResponse(formatContactAsCSV(limited));
+      } catch (error) {
+        return mcpResponse(formatError(error), true);
+      }
+    }
+  );
+
+  // ---------------------------------------------------------------------------
+  // create_contact - Create a new contact
+  // ---------------------------------------------------------------------------
+
+  server.tool(
+    "create_contact",
+    `Create a new contact.
+
+Example: create_contact(addressBook: "Default", fullName: "John Doe", emails: [{"type": "work", "value": "john@work.com"}], phones: [{"type": "cell", "value": "+1-555-1234"}])
+
+Returns the created contact's UID and URL on success.`,
+    CreateContactSchema.shape,
+    async (args) => {
+      try {
+        const client = await getClient();
+
+        // Resolve address book by name or URL
+        const addressBook = await resolveAddressBook(client, args.addressBook);
+        if (!addressBook) {
+          return mcpResponse(
+            `Address book not found: "${args.addressBook}". Use the 'address_books' tool to list available address books.`,
+            true
+          );
+        }
+
+        // Create vCard string
+        const { vCardString, uid } = createVCardString({
+          fullName: args.fullName,
+          emails: args.emails,
+          phones: args.phones,
+          organization: args.organization,
+          title: args.title,
+          notes: args.notes,
+        });
+
+        // Create the contact via CardDAV
+        const filename = generateVCardFilename(uid);
+        const response = await client.createVCard({
+          addressBook,
+          vCardString,
+          filename,
+        });
+
+        if (!response.ok) {
+          return mcpResponse(
+            `Failed to create contact: ${response.status} ${response.statusText}`,
+            true
+          );
+        }
+
+        // Construct the contact URL
+        const contactUrl = `${addressBook.url}${filename}`;
+
+        return mcpResponse(
+          `Contact created successfully.\nUID: ${uid}\nURL: ${contactUrl}`
+        );
+      } catch (error) {
+        return mcpResponse(formatError(error), true);
+      }
+    }
+  );
+
+  // ---------------------------------------------------------------------------
+  // delete_contact - Delete a contact
+  // ---------------------------------------------------------------------------
+
+  server.tool(
+    "delete_contact",
+    `Delete a contact by URL.
+
+Get the contact URL from the 'contacts' tool or 'create_contact' response.
+
+Example: delete_contact(url: "https://carddav.fastmail.com/dav/addressbooks/.../contact.vcf")`,
+    DeleteContactSchema.shape,
+    async (args) => {
+      try {
+        const client = await getClient();
+
+        // Delete by URL without etag
+        const response = await client.deleteObject({
+          url: args.url,
+        });
+
+        if (!response.ok) {
+          return mcpResponse(
+            `Failed to delete contact: ${response.status} ${response.statusText}`,
+            true
+          );
+        }
+
+        return mcpResponse(`Contact deleted successfully.`);
       } catch (error) {
         return mcpResponse(formatError(error), true);
       }

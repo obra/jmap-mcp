@@ -4,6 +4,8 @@ import {
   formatAddressBookAsCSV,
   formatContactAsCSV,
   parseVCard,
+  createVCardString,
+  generateVCardFilename,
   AddressBookInfo,
   ContactInfo,
 } from "./contacts.js";
@@ -340,6 +342,114 @@ END:VCARD`;
     expect(contact!.phones[1].type).toBe("home");
     expect(contact!.phones[2].type).toBe("cell");
     expect(contact!.phones[3].type).toBe("fax");
+  });
+});
+
+describe("createVCardString", () => {
+  it("creates valid vCard with required fields", () => {
+    const result = createVCardString({
+      fullName: "John Doe",
+    });
+
+    expect(result.uid).toBeDefined();
+    expect(result.uid).toContain("@fastmail-aibo");
+    expect(result.vCardString).toContain("BEGIN:VCARD");
+    expect(result.vCardString).toContain("END:VCARD");
+    expect(result.vCardString).toContain("FN:John Doe");
+    expect(result.vCardString).toContain(`UID:${result.uid}`);
+    expect(result.vCardString).toContain("VERSION:3.0");
+  });
+
+  it("includes emails with types", () => {
+    const result = createVCardString({
+      fullName: "Jane Doe",
+      emails: [
+        { type: "work", value: "jane@work.com" },
+        { type: "home", value: "jane@home.com" },
+      ],
+    });
+
+    expect(result.vCardString).toContain("EMAIL");
+    expect(result.vCardString).toContain("jane@work.com");
+    expect(result.vCardString).toContain("jane@home.com");
+  });
+
+  it("includes phones with types", () => {
+    const result = createVCardString({
+      fullName: "Bob Smith",
+      phones: [
+        { type: "cell", value: "+1-555-1234" },
+        { type: "work", value: "+1-555-5678" },
+      ],
+    });
+
+    expect(result.vCardString).toContain("TEL");
+    expect(result.vCardString).toContain("+1-555-1234");
+    expect(result.vCardString).toContain("+1-555-5678");
+  });
+
+  it("includes organization", () => {
+    const result = createVCardString({
+      fullName: "Alice Corp",
+      organization: "Example Inc",
+    });
+
+    expect(result.vCardString).toContain("ORG:Example Inc");
+  });
+
+  it("includes title", () => {
+    const result = createVCardString({
+      fullName: "Manager Person",
+      title: "Engineering Manager",
+    });
+
+    expect(result.vCardString).toContain("TITLE:Engineering Manager");
+  });
+
+  it("includes notes", () => {
+    const result = createVCardString({
+      fullName: "Notes Person",
+      notes: "Important client",
+    });
+
+    expect(result.vCardString).toContain("NOTE:Important client");
+  });
+
+  it("generates unique UIDs for each call", () => {
+    const result1 = createVCardString({ fullName: "Person 1" });
+    const result2 = createVCardString({ fullName: "Person 2" });
+
+    expect(result1.uid).not.toBe(result2.uid);
+  });
+
+  it("can be parsed by parseVCard", () => {
+    const result = createVCardString({
+      fullName: "Roundtrip Test",
+      emails: [{ type: "work", value: "test@example.com" }],
+      phones: [{ type: "cell", value: "+1-555-9999" }],
+      organization: "Test Org",
+      title: "Test Title",
+      notes: "Test Notes",
+    });
+
+    const parsed = parseVCard(result.vCardString, "/test/contact.vcf");
+    expect(parsed).toBeDefined();
+    expect(parsed!.uid).toBe(result.uid);
+    expect(parsed!.fullName).toBe("Roundtrip Test");
+    expect(parsed!.organization).toBe("Test Org");
+    expect(parsed!.title).toBe("Test Title");
+    expect(parsed!.notes).toBe("Test Notes");
+    expect(parsed!.emails).toHaveLength(1);
+    expect(parsed!.emails[0].value).toBe("test@example.com");
+    expect(parsed!.phones).toHaveLength(1);
+    expect(parsed!.phones[0].value).toBe("+1-555-9999");
+  });
+});
+
+describe("generateVCardFilename", () => {
+  it("generates .vcf filename from UID", () => {
+    const filename = generateVCardFilename("12345-abc@fastmail-aibo");
+    expect(filename).toBe("12345-abc@fastmail-aibo.vcf");
   });
 });
 
