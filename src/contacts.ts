@@ -293,6 +293,14 @@ export const createVCardString = (params: CreateContactParams): { vCardString: s
   vcard.updatePropertyWithValue("uid", uid);
   vcard.updatePropertyWithValue("fn", params.fullName);
 
+  // N (structured name) is required by vCard 3.0 spec
+  // Format: N:family;given;additional;prefix;suffix
+  // We'll parse fullName simply: last word = family, rest = given
+  const nameParts = params.fullName.trim().split(/\s+/);
+  const familyName = nameParts.length > 1 ? nameParts.pop() : "";
+  const givenName = nameParts.join(" ");
+  vcard.updatePropertyWithValue("n", [familyName, givenName, "", "", ""]);
+
   // Add optional fields
   if (params.organization) {
     vcard.updatePropertyWithValue("org", params.organization);
