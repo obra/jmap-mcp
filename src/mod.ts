@@ -79,9 +79,9 @@ const createServer = async () => {
       version: pkg.version,
     },
     {
-      instructions: `Fastmail Aibo - Email, Calendar, and Contacts for Fastmail.
+      instructions: `JMAP Email MCP - Manage email through JMAP-compliant servers.
 
-**Email Tools:**
+**Tools:**
 
 - \`search\` - Find emails with flexible filters. Returns summaries (id, subject, from, date, preview, flags).
   - Accepts mailbox names ("Inbox"), roles ("archive"), or IDs
@@ -94,7 +94,7 @@ const createServer = async () => {
   - thread: Get all emails in a thread by thread_id
 
 - \`show\` - Get full email with body, headers, and attachments.
-  - Bodies >25KB: truncated inline, full cached to ~/.cache/fastmail-aibo/
+  - Bodies >25KB: truncated inline, full cached to ~/.cache/jmap-mcp/
   - Attachments <100KB: auto-downloaded and cached
   - HTML emails: converted to markdown
   - Returns headers: list_unsubscribe, list_id, precedence, auto_submitted
@@ -113,25 +113,31 @@ const createServer = async () => {
   - subject: Optional for replies/forwards (auto-generated), required for new emails
   - draft: true to save without sending
 
-**Calendar Tools (requires FASTMAIL_USERNAME and FASTMAIL_PASSWORD):**
-
 - \`calendars\` - List all calendars with url, display_name, color, description
 
-- \`events\` - Get calendar events
-  - Filter by calendar name/url, date range (after/before)
-  - Returns: uid, url, summary, start, end, location, description, all_day
+- \`events\` - Get calendar events. Filter by calendar, date range. Returns uid, url, summary, start, end, location, all_day
 
-**Contacts Tools (requires FASTMAIL_USERNAME and FASTMAIL_PASSWORD):**
+- \`create_event\` - Create new calendar event. Requires calendar, summary, start. Optional: end, all_day, location, description
+
+- \`update_event\` - Update existing event by URL. Only provide fields to change. Empty string clears location/description
+
+- \`delete_event\` - Delete event by URL
 
 - \`address_books\` - List all address books with url, display_name, description
 
-- \`contacts\` - Get or search contacts
-  - Filter by address book name/url, search by name/email/organization
-  - Returns: uid, url, full_name, emails, phones, organization
+- \`contacts\` - Get or search contacts. Filter by address_book, query. Returns uid, url, full_name, emails, phones, organization
+
+- \`create_contact\` - Create new contact. Requires address_book, full_name. Optional: emails, phones, organization, title, notes
+
+- \`update_contact\` - Update existing contact by URL. Only provide fields to change. Empty string clears text, [] clears arrays
+
+- \`delete_contact\` - Delete contact by URL
 
 **Flags:** read, flagged, replied, draft (no $ prefix needed)
 
-**Mailbox resolution:** Use names ("Inbox"), roles ("archive"), or IDs interchangeably.`,
+**Mailbox resolution:** Use names ("Inbox"), roles ("archive"), or IDs interchangeably.
+
+Works with FastMail, Cyrus IMAP, Stalwart Mail Server, Apache James, and other JMAP servers.`,
   });
 
   const config = getJMAPConfig();
