@@ -9,6 +9,7 @@ import {
   formatCalendarAsCSV,
   formatCalendarEventAsCSV,
   createICalString,
+  updateICalString,
   generateICalFilename,
   CalendarClientConfig,
 } from "../calendar.js";
@@ -56,6 +57,30 @@ const CreateEventSchema = z.object({
   ),
   description: z.string().optional().describe(
     "Event description/notes"
+  ),
+});
+
+const UpdateEventSchema = z.object({
+  url: z.string().describe(
+    "The full URL of the event to update (returned by 'events' tool or 'create_event')"
+  ),
+  summary: z.string().optional().describe(
+    "New event title/summary"
+  ),
+  start: z.string().optional().describe(
+    'New start date/time. ISO 8601 format (e.g., "2024-12-04T10:00:00Z")'
+  ),
+  end: z.string().optional().describe(
+    'New end date/time. Same format as start.'
+  ),
+  all_day: z.boolean().optional().describe(
+    "Set to true for all-day events"
+  ),
+  location: z.string().optional().describe(
+    "New event location. Use empty string to clear."
+  ),
+  description: z.string().optional().describe(
+    "New event description. Use empty string to clear."
   ),
 });
 
@@ -261,6 +286,92 @@ Returns the created event's UID and URL on success.`,
         return mcpResponse(
           `Event created successfully.\nUID: ${uid}\nURL: ${eventUrl}`
         );
+      } catch (error) {
+        return mcpResponse(formatError(error), true);
+      }
+    }
+  );
+
+  // ---------------------------------------------------------------------------
+  // update_event - Update an existing calendar event
+  // ---------------------------------------------------------------------------
+
+  server.tool(
+    "update_event",
+    `Update an existing calendar event.
+
+Example: update_event(url: "https://caldav.fastmail.com/.../event.ics", summary: "New Title", location: "Room B")
+
+Only provide fields you want to change. Use empty string to clear location/description.`,
+    UpdateEventSchema.shape,
+    async (args) => {
+      try {
+        const client = await getClient();
+
+        // Fetch the existing event
+        const fetchResponse = await client.fetchCalendarObjects({
+          objectUrls: [args.url],
+        });
+
+        if (!fetchResponse || fetchResponse.length === 0) {
+          return mcpResponse(
+            `Event not found: "${args.url}"`,
+            true
+          );
+        }
+
+        const existingEvent = fetchResponse[0];
+        if (!existingEvent.data) {
+          return mcpResponse(
+            `Event has no data: "${args.url}"`,
+            true
+          );
+        }
+
+        // Parse dates if provided
+        let start: Date | undefined;
+        if (args.start) {
+          start = new Date(args.start);
+          if (isNaN(start.getTime())) {
+            return mcpResponse(`Invalid start date: "${args.start}"`, true);
+          }
+        }
+
+        let end: Date | undefined;
+        if (args.end) {
+          end = new Date(args.end);
+          if (isNaN(end.getTime())) {
+            return mcpResponse(`Invalid end date: "${args.end}"`, true);
+          }
+        }
+
+        // Update the iCal string
+        const updatedICalString = updateICalString(existingEvent.data, {
+          summary: args.summary,
+          start,
+          end,
+          allDay: args.all_day,
+          location: args.location,
+          description: args.description,
+        });
+
+        // Update the event via CalDAV
+        const response = await client.updateCalendarObject({
+          calendarObject: {
+            url: args.url,
+            data: updatedICalString,
+            etag: existingEvent.etag,
+          },
+        });
+
+        if (!response.ok) {
+          return mcpResponse(
+            `Failed to update event: ${response.status} ${response.statusText}`,
+            true
+          );
+        }
+
+        return mcpResponse(`Event updated successfully.`);
       } catch (error) {
         return mcpResponse(formatError(error), true);
       }

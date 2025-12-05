@@ -5,6 +5,7 @@ import {
   formatContactAsCSV,
   parseVCard,
   createVCardString,
+  updateVCardString,
   generateVCardFilename,
   AddressBookInfo,
   ContactInfo,
@@ -450,6 +451,148 @@ describe("generateVCardFilename", () => {
   it("generates .vcf filename from UID", () => {
     const filename = generateVCardFilename("12345-abc@fastmail-aibo");
     expect(filename).toBe("12345-abc@fastmail-aibo.vcf");
+  });
+});
+
+describe("updateVCardString", () => {
+  it("updates the full name of an existing contact", () => {
+    const original = createVCardString({
+      fullName: "John Doe",
+      emails: [{ type: "work", value: "john@example.com" }],
+    });
+
+    const updated = updateVCardString(original.vCardString, {
+      fullName: "John Smith",
+    });
+
+    const parsed = parseVCard(updated, "/test/contact.vcf");
+    expect(parsed).toBeDefined();
+    expect(parsed!.fullName).toBe("John Smith");
+    expect(parsed!.uid).toBe(original.uid); // UID preserved
+    expect(parsed!.emails[0].value).toBe("john@example.com"); // Email preserved
+  });
+
+  it("updates emails", () => {
+    const original = createVCardString({
+      fullName: "John Doe",
+      emails: [{ type: "work", value: "old@example.com" }],
+    });
+
+    const updated = updateVCardString(original.vCardString, {
+      emails: [
+        { type: "work", value: "new@work.com" },
+        { type: "home", value: "new@home.com" },
+      ],
+    });
+
+    const parsed = parseVCard(updated, "/test/contact.vcf");
+    expect(parsed).toBeDefined();
+    expect(parsed!.emails).toHaveLength(2);
+    expect(parsed!.emails[0].value).toBe("new@work.com");
+    expect(parsed!.emails[1].value).toBe("new@home.com");
+  });
+
+  it("updates phones", () => {
+    const original = createVCardString({
+      fullName: "John Doe",
+      phones: [{ type: "cell", value: "+1-555-0000" }],
+    });
+
+    const updated = updateVCardString(original.vCardString, {
+      phones: [{ type: "work", value: "+1-555-1234" }],
+    });
+
+    const parsed = parseVCard(updated, "/test/contact.vcf");
+    expect(parsed).toBeDefined();
+    expect(parsed!.phones).toHaveLength(1);
+    expect(parsed!.phones[0].value).toBe("+1-555-1234");
+    expect(parsed!.phones[0].type).toBe("work");
+  });
+
+  it("updates organization and title", () => {
+    const original = createVCardString({
+      fullName: "John Doe",
+      organization: "Old Corp",
+      title: "Old Title",
+    });
+
+    const updated = updateVCardString(original.vCardString, {
+      organization: "New Corp",
+      title: "New Title",
+    });
+
+    const parsed = parseVCard(updated, "/test/contact.vcf");
+    expect(parsed).toBeDefined();
+    expect(parsed!.organization).toBe("New Corp");
+    expect(parsed!.title).toBe("New Title");
+  });
+
+  it("updates notes", () => {
+    const original = createVCardString({
+      fullName: "John Doe",
+      notes: "Old notes",
+    });
+
+    const updated = updateVCardString(original.vCardString, {
+      notes: "New important notes",
+    });
+
+    const parsed = parseVCard(updated, "/test/contact.vcf");
+    expect(parsed).toBeDefined();
+    expect(parsed!.notes).toBe("New important notes");
+  });
+
+  it("preserves fields that are not updated", () => {
+    const original = createVCardString({
+      fullName: "John Doe",
+      organization: "My Corp",
+      title: "Engineer",
+      notes: "Important client",
+    });
+
+    // Only update fullName
+    const updated = updateVCardString(original.vCardString, {
+      fullName: "John Smith",
+    });
+
+    const parsed = parseVCard(updated, "/test/contact.vcf");
+    expect(parsed).toBeDefined();
+    expect(parsed!.fullName).toBe("John Smith");
+    expect(parsed!.organization).toBe("My Corp"); // preserved
+    expect(parsed!.title).toBe("Engineer"); // preserved
+    expect(parsed!.notes).toBe("Important client"); // preserved
+  });
+
+  it("clears optional fields when set to empty string", () => {
+    const original = createVCardString({
+      fullName: "John Doe",
+      organization: "My Corp",
+      notes: "Some notes",
+    });
+
+    const updated = updateVCardString(original.vCardString, {
+      organization: "", // clear organization
+    });
+
+    const parsed = parseVCard(updated, "/test/contact.vcf");
+    expect(parsed).toBeDefined();
+    expect(parsed!.organization).toBeUndefined(); // cleared
+    expect(parsed!.notes).toBe("Some notes"); // preserved
+  });
+
+  it("clears emails when set to empty array", () => {
+    const original = createVCardString({
+      fullName: "John Doe",
+      emails: [{ type: "work", value: "john@example.com" }],
+    });
+
+    const updated = updateVCardString(original.vCardString, {
+      emails: [],
+    });
+
+    const parsed = parseVCard(updated, "/test/contact.vcf");
+    expect(parsed).toBeDefined();
+    expect(parsed!.emails).toHaveLength(0);
   });
 });
 

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   createCalendarClient,
   createICalString,
+  updateICalString,
   generateICalFilename,
   formatCalendarAsCSV,
   formatCalendarEventAsCSV,
@@ -426,6 +427,121 @@ describe("generateICalFilename", () => {
   it("handles UIDs with special characters", () => {
     const filename = generateICalFilename("event-123@example.com");
     expect(filename).toBe("event-123@example.com.ics");
+  });
+});
+
+describe("updateICalString", () => {
+  it("updates the summary of an existing event", () => {
+    // Create an event first
+    const original = createICalString({
+      summary: "Original Meeting",
+      start: new Date("2024-12-04T10:00:00Z"),
+      end: new Date("2024-12-04T11:00:00Z"),
+    });
+
+    // Update the summary
+    const updated = updateICalString(original.icalString, {
+      summary: "Updated Meeting",
+    });
+
+    // Parse and verify
+    const parsed = parseICalEvent(updated, "/test/event.ics");
+    expect(parsed).toBeDefined();
+    expect(parsed!.summary).toBe("Updated Meeting");
+    expect(parsed!.uid).toBe(original.uid); // UID should be preserved
+  });
+
+  it("updates the start and end times", () => {
+    const original = createICalString({
+      summary: "Meeting",
+      start: new Date("2024-12-04T10:00:00Z"),
+      end: new Date("2024-12-04T11:00:00Z"),
+    });
+
+    const updated = updateICalString(original.icalString, {
+      start: new Date("2024-12-04T14:00:00Z"),
+      end: new Date("2024-12-04T15:30:00Z"),
+    });
+
+    const parsed = parseICalEvent(updated, "/test/event.ics");
+    expect(parsed).toBeDefined();
+    expect(parsed!.start.toISOString()).toBe("2024-12-04T14:00:00.000Z");
+    expect(parsed!.end?.toISOString()).toBe("2024-12-04T15:30:00.000Z");
+  });
+
+  it("updates location and description", () => {
+    const original = createICalString({
+      summary: "Meeting",
+      start: new Date("2024-12-04T10:00:00Z"),
+      location: "Old Room",
+      description: "Old notes",
+    });
+
+    const updated = updateICalString(original.icalString, {
+      location: "New Conference Room",
+      description: "New agenda items",
+    });
+
+    const parsed = parseICalEvent(updated, "/test/event.ics");
+    expect(parsed).toBeDefined();
+    expect(parsed!.location).toBe("New Conference Room");
+    expect(parsed!.description).toBe("New agenda items");
+  });
+
+  it("preserves fields that are not updated", () => {
+    const original = createICalString({
+      summary: "Original Title",
+      start: new Date("2024-12-04T10:00:00Z"),
+      location: "Room A",
+      description: "Important notes",
+    });
+
+    // Only update the summary
+    const updated = updateICalString(original.icalString, {
+      summary: "New Title",
+    });
+
+    const parsed = parseICalEvent(updated, "/test/event.ics");
+    expect(parsed).toBeDefined();
+    expect(parsed!.summary).toBe("New Title");
+    expect(parsed!.location).toBe("Room A"); // preserved
+    expect(parsed!.description).toBe("Important notes"); // preserved
+  });
+
+  it("can convert to all-day event", () => {
+    const original = createICalString({
+      summary: "Timed Event",
+      start: new Date("2024-12-04T10:00:00Z"),
+      end: new Date("2024-12-04T11:00:00Z"),
+      allDay: false,
+    });
+
+    const updated = updateICalString(original.icalString, {
+      start: new Date("2024-12-25T00:00:00Z"),
+      allDay: true,
+    });
+
+    const parsed = parseICalEvent(updated, "/test/event.ics");
+    expect(parsed).toBeDefined();
+    expect(parsed!.allDay).toBe(true);
+  });
+
+  it("clears optional fields when set to empty string", () => {
+    const original = createICalString({
+      summary: "Meeting",
+      start: new Date("2024-12-04T10:00:00Z"),
+      location: "Room A",
+      description: "Notes",
+    });
+
+    const updated = updateICalString(original.icalString, {
+      location: "", // clear location
+    });
+
+    const parsed = parseICalEvent(updated, "/test/event.ics");
+    expect(parsed).toBeDefined();
+    expect(parsed!.location).toBeUndefined(); // cleared
+    expect(parsed!.description).toBe("Notes"); // preserved
   });
 });
 

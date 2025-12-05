@@ -362,6 +362,93 @@ export const generateICalFilename = (uid: string): string => {
 };
 
 // =============================================================================
+// iCal Update (using ical.js)
+// =============================================================================
+
+export interface UpdateEventParams {
+  summary?: string;
+  start?: Date;
+  end?: Date;
+  allDay?: boolean;
+  location?: string;
+  description?: string;
+}
+
+/**
+ * Update an existing iCal string with new values
+ * Preserves the UID and other fields not being updated
+ * Empty string values clear the field
+ */
+export const updateICalString = (
+  icalString: string,
+  updates: UpdateEventParams
+): string => {
+  const jcalData = ICAL.parse(icalString);
+  const vcalendar = new ICAL.Component(jcalData);
+  const vevent = vcalendar.getFirstSubcomponent("vevent");
+
+  if (!vevent) {
+    throw new Error("No VEVENT found in iCal string");
+  }
+
+  // Update summary
+  if (updates.summary !== undefined) {
+    vevent.updatePropertyWithValue("summary", updates.summary);
+  }
+
+  // Update start time
+  if (updates.start !== undefined) {
+    const startTime = ICAL.Time.fromJSDate(updates.start, false);
+    if (updates.allDay) {
+      startTime.isDate = true;
+    }
+    vevent.updatePropertyWithValue("dtstart", startTime);
+  } else if (updates.allDay !== undefined) {
+    // Just changing allDay flag without changing the time
+    const dtstart = vevent.getFirstProperty("dtstart");
+    if (dtstart) {
+      const currentTime = dtstart.getFirstValue();
+      if (currentTime) {
+        currentTime.isDate = updates.allDay;
+        dtstart.setValue(currentTime);
+      }
+    }
+  }
+
+  // Update end time
+  if (updates.end !== undefined) {
+    const endTime = ICAL.Time.fromJSDate(updates.end, false);
+    if (updates.allDay) {
+      endTime.isDate = true;
+    }
+    vevent.updatePropertyWithValue("dtend", endTime);
+  }
+
+  // Update location (empty string clears it)
+  if (updates.location !== undefined) {
+    if (updates.location === "") {
+      vevent.removeProperty("location");
+    } else {
+      vevent.updatePropertyWithValue("location", updates.location);
+    }
+  }
+
+  // Update description (empty string clears it)
+  if (updates.description !== undefined) {
+    if (updates.description === "") {
+      vevent.removeProperty("description");
+    } else {
+      vevent.updatePropertyWithValue("description", updates.description);
+    }
+  }
+
+  // Update DTSTAMP to now (required for updates)
+  vevent.updatePropertyWithValue("dtstamp", ICAL.Time.now());
+
+  return vcalendar.toString();
+};
+
+// =============================================================================
 // CalDAV Client
 // =============================================================================
 

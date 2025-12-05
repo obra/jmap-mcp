@@ -342,6 +342,99 @@ export const generateVCardFilename = (uid: string): string => {
 };
 
 // =============================================================================
+// vCard Update (using ical.js)
+// =============================================================================
+
+export interface UpdateContactParams {
+  fullName?: string;
+  emails?: Array<{ type?: string; value: string }>;
+  phones?: Array<{ type?: string; value: string }>;
+  organization?: string;
+  title?: string;
+  notes?: string;
+}
+
+/**
+ * Update an existing vCard string with new values
+ * Preserves the UID and other fields not being updated
+ * Empty string values clear the field
+ * Empty arrays clear the email/phone lists
+ */
+export const updateVCardString = (
+  vCardString: string,
+  updates: UpdateContactParams
+): string => {
+  const jcalData = ICAL.parse(vCardString);
+  const vcard = new ICAL.Component(jcalData);
+
+  // Update fullName
+  if (updates.fullName !== undefined) {
+    vcard.updatePropertyWithValue("fn", updates.fullName);
+  }
+
+  // Update organization (empty string clears it)
+  if (updates.organization !== undefined) {
+    if (updates.organization === "") {
+      vcard.removeProperty("org");
+    } else {
+      vcard.updatePropertyWithValue("org", updates.organization);
+    }
+  }
+
+  // Update title (empty string clears it)
+  if (updates.title !== undefined) {
+    if (updates.title === "") {
+      vcard.removeProperty("title");
+    } else {
+      vcard.updatePropertyWithValue("title", updates.title);
+    }
+  }
+
+  // Update notes (empty string clears it)
+  if (updates.notes !== undefined) {
+    if (updates.notes === "") {
+      vcard.removeProperty("note");
+    } else {
+      vcard.updatePropertyWithValue("note", updates.notes);
+    }
+  }
+
+  // Update emails (replace all existing)
+  if (updates.emails !== undefined) {
+    // Remove all existing email properties
+    vcard.removeAllProperties("email");
+
+    // Add new emails
+    for (const email of updates.emails) {
+      const prop = new ICAL.Property("email");
+      prop.setValue(email.value);
+      if (email.type) {
+        prop.setParameter("type", email.type.toUpperCase());
+      }
+      vcard.addProperty(prop);
+    }
+  }
+
+  // Update phones (replace all existing)
+  if (updates.phones !== undefined) {
+    // Remove all existing tel properties
+    vcard.removeAllProperties("tel");
+
+    // Add new phones
+    for (const phone of updates.phones) {
+      const prop = new ICAL.Property("tel");
+      prop.setValue(phone.value);
+      if (phone.type) {
+        prop.setParameter("type", phone.type.toUpperCase());
+      }
+      vcard.addProperty(prop);
+    }
+  }
+
+  return vcard.toString();
+};
+
+// =============================================================================
 // CardDAV Client
 // =============================================================================
 

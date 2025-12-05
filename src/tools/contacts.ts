@@ -10,6 +10,7 @@ import {
   formatAddressBookAsCSV,
   formatContactAsCSV,
   createVCardString,
+  updateVCardString,
   generateVCardFilename,
   ContactsClientConfig,
 } from "../contacts.js";
@@ -64,6 +65,30 @@ const CreateContactSchema = z.object({
   ),
   notes: z.string().optional().describe(
     "Additional notes about the contact"
+  ),
+});
+
+const UpdateContactSchema = z.object({
+  url: z.string().describe(
+    "The full URL of the contact to update (returned by 'contacts' tool or 'create_contact')"
+  ),
+  fullName: z.string().optional().describe(
+    "New full name for the contact"
+  ),
+  emails: z.array(EmailSchema).optional().describe(
+    'New email addresses (replaces all existing). Use [] to clear.'
+  ),
+  phones: z.array(PhoneSchema).optional().describe(
+    'New phone numbers (replaces all existing). Use [] to clear.'
+  ),
+  organization: z.string().optional().describe(
+    "New company/organization. Use empty string to clear."
+  ),
+  title: z.string().optional().describe(
+    "New job title. Use empty string to clear."
+  ),
+  notes: z.string().optional().describe(
+    "New notes. Use empty string to clear."
   ),
 });
 
@@ -252,6 +277,75 @@ Returns the created contact's UID and URL on success.`,
         return mcpResponse(
           `Contact created successfully.\nUID: ${uid}\nURL: ${contactUrl}`
         );
+      } catch (error) {
+        return mcpResponse(formatError(error), true);
+      }
+    }
+  );
+
+  // ---------------------------------------------------------------------------
+  // update_contact - Update an existing contact
+  // ---------------------------------------------------------------------------
+
+  server.tool(
+    "update_contact",
+    `Update an existing contact.
+
+Example: update_contact(url: "https://carddav.fastmail.com/.../contact.vcf", fullName: "John Smith", organization: "New Corp")
+
+Only provide fields you want to change. Use empty string to clear text fields, empty array [] to clear emails/phones.`,
+    UpdateContactSchema.shape,
+    async (args) => {
+      try {
+        const client = await getClient();
+
+        // Fetch the existing contact
+        const fetchResponse = await client.fetchVCards({
+          objectUrls: [args.url],
+        });
+
+        if (!fetchResponse || fetchResponse.length === 0) {
+          return mcpResponse(
+            `Contact not found: "${args.url}"`,
+            true
+          );
+        }
+
+        const existingContact = fetchResponse[0];
+        if (!existingContact.data) {
+          return mcpResponse(
+            `Contact has no data: "${args.url}"`,
+            true
+          );
+        }
+
+        // Update the vCard string
+        const updatedVCardString = updateVCardString(existingContact.data, {
+          fullName: args.fullName,
+          emails: args.emails,
+          phones: args.phones,
+          organization: args.organization,
+          title: args.title,
+          notes: args.notes,
+        });
+
+        // Update the contact via CardDAV
+        const response = await client.updateVCard({
+          vCard: {
+            url: args.url,
+            data: updatedVCardString,
+            etag: existingContact.etag,
+          },
+        });
+
+        if (!response.ok) {
+          return mcpResponse(
+            `Failed to update contact: ${response.status} ${response.statusText}`,
+            true
+          );
+        }
+
+        return mcpResponse(`Contact updated successfully.`);
       } catch (error) {
         return mcpResponse(formatError(error), true);
       }
