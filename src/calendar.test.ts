@@ -584,14 +584,12 @@ describe("createICalString - attendees and organizer", () => {
         { email: "alice@example.com", role: "chair" },
         { email: "bob@example.com", role: "required" },
         { email: "carol@example.com", role: "optional" },
-        { email: "dave@example.com", role: "non-participant" },
       ],
     });
 
     expect(result.icalString).toContain("ROLE=CHAIR");
     expect(result.icalString).toContain("ROLE=REQ-PARTICIPANT");
     expect(result.icalString).toContain("ROLE=OPT-PARTICIPANT");
-    expect(result.icalString).toContain("ROLE=NON-PARTICIPANT");
   });
 
   it("creates iCal with organizer", () => {
@@ -699,7 +697,7 @@ describe("createICalString - status, url, categories, priority, transparency", (
     expect(result.icalString).toContain("CATEGORIES:Work\\,Important");
   });
 
-  it("creates iCal with priority", () => {
+  it("creates iCal with priority (numeric)", () => {
     const result = createICalString({
       summary: "Urgent Meeting",
       start: new Date("2024-12-04T10:00:00Z"),
@@ -709,21 +707,52 @@ describe("createICalString - status, url, categories, priority, transparency", (
     expect(result.icalString).toContain("PRIORITY:1");
   });
 
-  it("creates iCal with opaque transparency (busy)", () => {
+  it("creates iCal with priority labels", () => {
+    // Test each user-friendly label maps to correct iCal priority
+    const urgent = createICalString({
+      summary: "Urgent",
+      start: new Date("2024-12-04T10:00:00Z"),
+      priority: "urgent",
+    });
+    expect(urgent.icalString).toContain("PRIORITY:1");
+
+    const high = createICalString({
+      summary: "High",
+      start: new Date("2024-12-04T10:00:00Z"),
+      priority: "high",
+    });
+    expect(high.icalString).toContain("PRIORITY:2");
+
+    const normal = createICalString({
+      summary: "Normal",
+      start: new Date("2024-12-04T10:00:00Z"),
+      priority: "normal",
+    });
+    expect(normal.icalString).toContain("PRIORITY:5");
+
+    const low = createICalString({
+      summary: "Low",
+      start: new Date("2024-12-04T10:00:00Z"),
+      priority: "low",
+    });
+    expect(low.icalString).toContain("PRIORITY:9");
+  });
+
+  it("creates iCal with showAs: busy", () => {
     const result = createICalString({
       summary: "Busy Time",
       start: new Date("2024-12-04T10:00:00Z"),
-      transparency: "opaque",
+      showAs: "busy",
     });
 
     expect(result.icalString).toContain("TRANSP:OPAQUE");
   });
 
-  it("creates iCal with transparent transparency (free)", () => {
+  it("creates iCal with showAs: free", () => {
     const result = createICalString({
       summary: "Free Time",
       start: new Date("2024-12-04T10:00:00Z"),
-      transparency: "transparent",
+      showAs: "free",
     });
 
     expect(result.icalString).toContain("TRANSP:TRANSPARENT");
@@ -937,14 +966,14 @@ describe("updateICalString - new fields", () => {
     expect(updated).not.toContain("PRIORITY:");
   });
 
-  it("updates transparency", () => {
+  it("updates showAs", () => {
     const original = createICalString({
       summary: "Meeting",
       start: new Date("2024-12-04T10:00:00Z"),
     });
 
     const updated = updateICalString(original.icalString, {
-      transparency: "transparent",
+      showAs: "free",
     });
 
     expect(updated).toContain("TRANSP:TRANSPARENT");

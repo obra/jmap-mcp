@@ -314,7 +314,7 @@ export interface AttendeeInput {
   email: string;
   name?: string;
   rsvp?: boolean; // Request RSVP (default true)
-  role?: "required" | "optional" | "non-participant" | "chair";
+  role?: "required" | "optional" | "chair"; // Simplified roles
 }
 
 export interface ReminderInput {
@@ -339,8 +339,8 @@ export interface CreateEventParams {
   status?: "confirmed" | "tentative" | "cancelled";
   url?: string; // Meeting link
   categories?: string[];
-  priority?: number; // 1-9
-  transparency?: "opaque" | "transparent"; // busy or free
+  priority?: "urgent" | "high" | "normal" | "low" | number; // User-friendly labels or 1-9
+  showAs?: "busy" | "free"; // User-friendly version of transparency
   reminders?: ReminderInput[];
 }
 
@@ -360,10 +360,31 @@ const roleToICalRole = (role: string): string => {
   const mapping: Record<string, string> = {
     required: "REQ-PARTICIPANT",
     optional: "OPT-PARTICIPANT",
-    "non-participant": "NON-PARTICIPANT",
     chair: "CHAIR",
   };
   return mapping[role] ?? "REQ-PARTICIPANT";
+};
+
+/**
+ * Convert user-friendly priority labels to iCalendar 1-9 scale
+ * iCal: 1-4 = high, 5 = normal, 6-9 = low
+ */
+const priorityLabelToNumber = (priority: string | number): number => {
+  if (typeof priority === "number") return priority;
+  const mapping: Record<string, number> = {
+    urgent: 1,
+    high: 2,
+    normal: 5,
+    low: 9,
+  };
+  return mapping[priority.toLowerCase()] ?? 5;
+};
+
+/**
+ * Convert user-friendly showAs to iCalendar TRANSP value
+ */
+const showAsToTransparency = (showAs: string): string => {
+  return showAs === "free" ? "TRANSPARENT" : "OPAQUE";
 };
 
 /**
@@ -440,14 +461,17 @@ export const createICalString = (params: CreateEventParams): { icalString: strin
     vevent.updatePropertyWithValue("categories", params.categories.join(","));
   }
 
-  // Priority (1-9)
-  if (params.priority !== undefined && params.priority >= 1 && params.priority <= 9) {
-    vevent.updatePropertyWithValue("priority", params.priority);
+  // Priority (user-friendly labels or 1-9)
+  if (params.priority !== undefined) {
+    const priorityNum = priorityLabelToNumber(params.priority);
+    if (priorityNum >= 1 && priorityNum <= 9) {
+      vevent.updatePropertyWithValue("priority", priorityNum);
+    }
   }
 
-  // Transparency (OPAQUE = busy, TRANSPARENT = free)
-  if (params.transparency) {
-    vevent.updatePropertyWithValue("transp", params.transparency.toUpperCase());
+  // Show as busy/free (OPAQUE = busy, TRANSPARENT = free)
+  if (params.showAs) {
+    vevent.updatePropertyWithValue("transp", showAsToTransparency(params.showAs));
   }
 
   // Organizer
@@ -554,8 +578,8 @@ export interface UpdateEventParams {
   status?: "confirmed" | "tentative" | "cancelled" | ""; // Empty string clears
   url?: string; // Empty string clears
   categories?: string[]; // Empty array clears
-  priority?: number | null; // null clears
-  transparency?: "opaque" | "transparent" | ""; // Empty string clears
+  priority?: "urgent" | "high" | "normal" | "low" | number | null; // null clears
+  showAs?: "busy" | "free" | ""; // Empty string clears
   reminders?: ReminderInput[]; // Empty array clears
 }
 
@@ -658,17 +682,20 @@ export const updateICalString = (
   if (updates.priority !== undefined) {
     if (updates.priority === null) {
       vevent.removeProperty("priority");
-    } else if (updates.priority >= 1 && updates.priority <= 9) {
-      vevent.updatePropertyWithValue("priority", updates.priority);
+    } else {
+      const priorityNum = priorityLabelToNumber(updates.priority);
+      if (priorityNum >= 1 && priorityNum <= 9) {
+        vevent.updatePropertyWithValue("priority", priorityNum);
+      }
     }
   }
 
-  // Update transparency
-  if (updates.transparency !== undefined) {
-    if (updates.transparency === "") {
+  // Update showAs (busy/free)
+  if (updates.showAs !== undefined) {
+    if (updates.showAs === "") {
       vevent.removeProperty("transp");
     } else {
-      vevent.updatePropertyWithValue("transp", updates.transparency.toUpperCase());
+      vevent.updatePropertyWithValue("transp", showAsToTransparency(updates.showAs));
     }
   }
 

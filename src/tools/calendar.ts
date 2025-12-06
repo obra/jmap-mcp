@@ -61,8 +61,8 @@ const AttendeeSchema = z.object({
   email: z.string().email().describe("Attendee's email address"),
   name: z.string().optional().describe("Attendee's display name"),
   rsvp: z.boolean().optional().describe("Request RSVP from attendee (default true)"),
-  role: z.enum(["required", "optional", "non-participant", "chair"]).optional().describe(
-    "Attendee's role: required (default), optional, non-participant, or chair"
+  role: z.enum(["required", "optional", "chair"]).optional().describe(
+    "Attendee's role: required (default), optional, or chair (for meeting leader)"
   ),
 });
 
@@ -119,11 +119,11 @@ const CreateEventSchema = z.object({
   categories: z.array(z.string()).optional().describe(
     'Categories/tags for the event. Example: ["work", "meeting"]'
   ),
-  priority: z.number().min(1).max(9).optional().describe(
-    "Priority 1-9 (1=highest, 9=lowest). Most calendars show 1-4 as high priority."
+  priority: z.enum(["urgent", "high", "normal", "low"]).optional().describe(
+    "Event priority: urgent, high, normal (default), or low"
   ),
-  transparency: z.enum(["opaque", "transparent"]).optional().describe(
-    "Show as: opaque (busy, default) or transparent (free/available)"
+  showAs: z.enum(["busy", "free"]).optional().describe(
+    "Show as: busy (default, blocks time) or free (available)"
   ),
   reminders: z.array(ReminderSchema).optional().describe(
     'Reminders before event. Example: [{minutes: 15}, {hours: 1}, {days: 1}]'
@@ -168,10 +168,10 @@ const UpdateEventSchema = z.object({
   categories: z.array(z.string()).optional().describe(
     "Categories/tags. Empty array clears categories."
   ),
-  priority: z.number().min(1).max(9).nullable().optional().describe(
-    "Priority 1-9. Use null to clear."
+  priority: z.enum(["urgent", "high", "normal", "low"]).nullable().optional().describe(
+    "Event priority. Use null to clear."
   ),
-  transparency: z.enum(["opaque", "transparent"]).or(z.literal("")).optional().describe(
+  showAs: z.enum(["busy", "free"]).or(z.literal("")).optional().describe(
     "Show as busy/free. Empty string clears."
   ),
   reminders: z.array(ReminderSchema).optional().describe(
@@ -418,7 +418,7 @@ Returns the created event's UID and URL on success.`,
           url: args.url,
           categories: args.categories,
           priority: args.priority,
-          transparency: args.transparency,
+          showAs: args.showAs,
           reminders: args.reminders,
         });
 
@@ -522,7 +522,7 @@ Only provide fields you want to change. Use empty string to clear location/descr
           url: args.eventUrl,
           categories: args.categories,
           priority: args.priority,
-          transparency: args.transparency as any,
+          showAs: args.showAs as any,
           reminders: args.reminders,
         });
 

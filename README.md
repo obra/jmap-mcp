@@ -316,8 +316,8 @@ create_event({
   status: "confirmed",        // confirmed, tentative, cancelled
   url: "https://zoom.us/j/123456789",  // Meeting link
   categories: ["Work", "Important"],
-  priority: 2,                // 1=urgent, 2=high, 3=normal, 4=low
-  transparency: "opaque",     // opaque (busy) or transparent (free)
+  priority: "high",           // urgent, high, normal, low
+  showAs: "busy",             // busy or free
   attendees: [
     { email: "team@example.com", name: "Team", role: "required", rsvp: true }
   ],
@@ -329,7 +329,7 @@ create_event({
 **Attendee options:**
 - `email` (required): Attendee's email address
 - `name` (optional): Display name
-- `role`: `required` (default), `optional`, `non-participant`, `chair`
+- `role`: `required` (default), `optional`, or `chair` (for meeting leader)
 - `rsvp`: Request RSVP from attendee (default: true)
 
 **Reminder options (specify one):**
@@ -376,7 +376,8 @@ update_event({
   location: "",          // Clear location
   categories: [],        // Clear all categories
   reminders: [],         // Clear all reminders
-  priority: null         // Clear priority
+  priority: null,        // Clear priority
+  showAs: ""             // Clear showAs (revert to default)
 })
 ```
 
